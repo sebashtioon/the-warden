@@ -9,6 +9,7 @@ const COMMANDS_HELP_TEXT = [
   "- !warden dr-list -> list all reminders",
   "- !warden dr-del <id> -> delete one reminder",
   "- !warden dr-del-all -> delete all reminders",
+  "- !warden type <text> -> post as warden bot and delete your command",
   "- !warden help -> show this command list"
 ].join("\n");
 
@@ -174,14 +175,14 @@ export default {
       if (contentType.includes("application/json")) {
         body = await request.json();
       } else if (contentType.includes("application/x-www-form-urlencoded")) {
-        const formData = await request.text();
-        // Slack sends payload as: payload=<urlencoded JSON>
-        const match = formData.match(/payload=([^&]*)/);
-        if (match) {
-          const decoded = decodeURIComponent(match[1]);
+        const rawForm = await request.text();
+        const formParams = new URLSearchParams(rawForm);
+        // Interactive events send payload=<urlencoded JSON> while slash commands send plain fields.
+        if (formParams.has("payload")) {
+          const decoded = decodeURIComponent(formParams.get("payload") || "");
           body = JSON.parse(decoded);
         } else {
-          throw new Error("No payload found in form data");
+          body = Object.fromEntries(formParams.entries());
         }
       } else {
         throw new Error("Unsupported content-type: " + contentType);
@@ -201,7 +202,18 @@ export default {
       return new Response(body.challenge, { status: 200 });
     }
 
-    const event = body.event;
+    const isSlashCommand = body.command === "/warden";
+    const slashCommandEvent = isSlashCommand
+      ? {
+          type: "message",
+          user: body.user_id,
+          channel: body.channel_id,
+          text: `!warden ${(body.text || "").trim()}`
+        }
+      : null;
+    const ack = () => new Response(isSlashCommand ? "" : "ok", { status: 200 });
+
+    const event = body.event || slashCommandEvent;
     const rulesCanvasUrl = env.RULES_CANVAS_URL || "https://hackclub.enterprise.slack.com/docs/T0266FRGM/F0AL6S8QWFR";
     const joinTestChannelId = "C0ALRPWUTC4";
     const joinAnnounceChannelId = env.JOIN_ANNOUNCE_CHANNEL_ID || "C0A7JH50JG4";
@@ -299,7 +311,7 @@ export default {
             text: "bro what do you want im tryna sleep"
           });
           console.log("Slack API response (warden bare command):", bareWarden);
-          return new Response("ok", { status: 200 });
+          return ack();
         }
 
         if (event.user !== WARDEN_USER_ID) {
@@ -309,7 +321,70 @@ export default {
             text: "ay look...\n\nthis guy really tried to use warden commands :loll:"
           });
           console.log("Slack API response (warden unauthorized):", denied);
-          return new Response("ok", { status: 200 });
+          return ack();
+        }
+
+        const typeMatch = rawText.match(/^!warden\s+type\s+([\s\S]+)$/i);
+        if (typeMatch) {
+          const typeText = typeMatch[1].trim();
+          if (!typeText) {
+            const typeHelp = await postSlackMessage(env, {
+              channel,
+              thread_ts,
+              text: "usage: !warden type your message here :loll:"
+            });
+            console.log("Slack API response (warden type help):", typeHelp);
+            return ack();
+          }
+
+          const typed = await postSlackMessage(env, {
+            channel,
+            text: typeText
+          });
+          console.log("Slack API response (warden type post):", typed);
+
+          const deleteRes = await fetch("https://slack.com/api/chat.delete", {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${env.SLACK_BOT_TOKEN}`,
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              channel,
+              ts: event.ts
+            })
+          });
+          const deleteData = await deleteRes.json();
+          console.log("Slack API response (warden type delete command):", deleteData);
+          return ack();
+        }
+
+        const wardenRestText = trimmedText.replace(/^!warden\s*/i, "").trim();
+        const isKnownSubcommand = /^(help|dr\s|dr-list$|dr-del-all$|dr-del\s)/i.test(wardenRestText);
+        if (wardenRestText && !isKnownSubcommand) {
+          const typed = await postSlackMessage(env, {
+            channel,
+            text: wardenRestText
+          });
+          console.log("Slack API response (warden inferred type post):", typed);
+
+          if (event.ts) {
+            const deleteRes = await fetch("https://slack.com/api/chat.delete", {
+              method: "POST",
+              headers: {
+                "Authorization": `Bearer ${env.SLACK_BOT_TOKEN}`,
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({
+                channel,
+                ts: event.ts
+              })
+            });
+            const deleteData = await deleteRes.json();
+            console.log("Slack API response (warden inferred type delete command):", deleteData);
+          }
+
+          return ack();
         }
 
         if (!env.WARDEN_KV) {
@@ -319,7 +394,7 @@ export default {
             text: "i cant save reminders yet. bind a KV namespace as WARDEN_KV and redeploy bozo"
           });
           console.log("Slack API response (warden missing kv):", kvError);
-          return new Response("ok", { status: 200 });
+          return ack();
         }
 
         if (normalizedText === "!warden help") {
@@ -329,7 +404,7 @@ export default {
             text: COMMANDS_HELP_TEXT
           });
           console.log("Slack API response (warden help):", helpReply);
-          return new Response("ok", { status: 200 });
+          return ack();
         }
 
         const listMatch = trimmedText.match(/^!warden\s+dr-list$/i);
@@ -342,7 +417,7 @@ export default {
               text: "alr bro heres your reminder list:\n\n(no reminders yet)"
             });
             console.log("Slack API response (warden list empty):", emptyList);
-            return new Response("ok", { status: 200 });
+            return ack();
           }
 
           const lines = reminders.map((r, i) => `${i + 1}. id: ${r.id}\n   reminder: \"${r.text}\"\n   schedule: ${r.timeRaw} (${r.time24}) ${r.timeZoneCode || DEFAULT_WARDEN_TIME_ZONE_CODE}\n   ping warden: ${r.pingWarden ? "yes" : "no"}`);
@@ -352,7 +427,7 @@ export default {
             text: `alr bro heres your reminder list:\n\n${lines.join("\n\n")}`
           });
           console.log("Slack API response (warden list):", listResponse);
-          return new Response("ok", { status: 200 });
+          return ack();
         }
 
         const deleteAllMatch = trimmedText.match(/^!warden\s+dr-del-all$/i);
@@ -368,7 +443,7 @@ export default {
             text: deleteAllText
           });
           console.log("Slack API response (warden delete all):", deletedAll);
-          return new Response("ok", { status: 200 });
+          return ack();
         }
 
         const deleteMatch = trimmedText.match(/^!warden\s+dr-del\s+([a-z0-9-]{8,})$/i);
@@ -384,7 +459,7 @@ export default {
               text: `no reminder found with id ${reminderId} :loll:`
             });
             console.log("Slack API response (warden delete missing):", missing);
-            return new Response("ok", { status: 200 });
+            return ack();
           }
 
           await saveDailyReminders(env, nextReminders);
@@ -394,7 +469,7 @@ export default {
             text: `damn what did the reminder do? :noooovanish:\n\n(deleted reminder ${reminderId})`
           });
           console.log("Slack API response (warden delete):", deleted);
-          return new Response("ok", { status: 200 });
+          return ack();
         }
 
         const parsedCommand = parseDailyReminderCommand(rawText);
@@ -406,7 +481,7 @@ export default {
               text: `invalid timezone: ${parsedCommand.providedTimeZone}. use only aliases: AEDT, AEST, UTC, GMT.`
             });
             console.log("Slack API response (warden invalid timezone):", tzError);
-            return new Response("ok", { status: 200 });
+            return ack();
           }
 
           const help = await postSlackMessage(env, {
@@ -415,7 +490,7 @@ export default {
             text: "what the fuck is that command bro??? :loll:"
           });
           console.log("Slack API response (warden invalid format):", help);
-          return new Response("ok", { status: 200 });
+          return ack();
         }
 
         const reminders = await loadDailyReminders(env);
@@ -434,13 +509,13 @@ export default {
         reminders.push(reminder);
         await saveDailyReminders(env, reminders);
 
-        const ack = await postSlackMessage(env, {
+        const savedReply = await postSlackMessage(env, {
           channel,
           thread_ts,
           text: `alr gng ive set a daily reminder for \"${reminder.text}\" at ${reminder.timeRaw} (${reminder.time24}) ${reminder.timeZoneCode}${reminder.pingWarden ? ", and youre getting pinged" : ""}`
         });
-        console.log("Slack API response (warden saved):", ack);
-        return new Response("ok", { status: 200 });
+        console.log("Slack API response (warden saved):", savedReply);
+        return ack();
       }
 
       // keyword example: "skrillex"
@@ -516,10 +591,10 @@ export default {
       });
       const data = await res.json();
       console.log("Slack API response (hii_button):", data);
-      return new Response("ok", { status: 200 });
+      return ack();
     }
 
-    return new Response("ok", { status: 200 });
+    return ack();
   },
 
   async scheduled(controller, env) {
