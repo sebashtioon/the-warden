@@ -437,7 +437,7 @@ export default {
         const ack = await postSlackMessage(env, {
           channel,
           thread_ts,
-          text: `alr gng ive set a reminder for \"${reminder.text}\" at ${reminder.timeRaw} (${reminder.time24}) ${reminder.timeZoneCode}${reminder.pingWarden ? ", and youre getting pinged" : ""}.`
+          text: `alr gng ive set a reminder for \"${reminder.text}\" at ${reminder.timeRaw} (${reminder.time24}) ${reminder.timeZoneCode}${reminder.pingWarden ? ", and youre getting pinged" : ""}`
         });
         console.log("Slack API response (warden saved):", ack);
         return new Response("ok", { status: 200 });
