@@ -292,6 +292,16 @@ export default {
 
       // warden command: !warden dr "..." yes|no 12:00pm
       if (normalizedText.startsWith("!warden")) {
+        if (normalizedText === "!warden") {
+          const bareWarden = await postSlackMessage(env, {
+            channel,
+            thread_ts,
+            text: "bro what do you want im tryna sleep"
+          });
+          console.log("Slack API response (warden bare command):", bareWarden);
+          return new Response("ok", { status: 200 });
+        }
+
         if (event.user !== WARDEN_USER_ID) {
           const denied = await postSlackMessage(env, {
             channel,
@@ -348,12 +358,14 @@ export default {
         const deleteAllMatch = trimmedText.match(/^!warden\s+dr-del-all$/i);
         if (deleteAllMatch) {
           const reminders = await loadDailyReminders(env);
-          const hadNoReminders = reminders.length === 0;
           await saveDailyReminders(env, []);
+          const deleteAllText = reminders.length === 0
+            ? "damn what did all the reminders do?? :noooovanish:\n\n(deleted 0 reminders) :loll:"
+            : `damn what did all the reminders do?? :noooovanish:\n\n(deleted ${reminders.length} reminder${reminders.length === 1 ? "" : "s"})`;
           const deletedAll = await postSlackMessage(env, {
             channel,
             thread_ts,
-            text: `damn what did all the reminders do?? :noooovanish:\n\n(deleted ${reminders.length} reminder${reminders.length === 1 ? "" : "s"})${hadNoReminders ? " :loll:" : ""}`
+            text: deleteAllText
           });
           console.log("Slack API response (warden delete all):", deletedAll);
           return new Response("ok", { status: 200 });
@@ -400,7 +412,7 @@ export default {
           const help = await postSlackMessage(env, {
             channel,
             thread_ts,
-            text: "invalid format. use: !warden dr \"do something useful stinky\" yes 12:00pm [timezone]"
+            text: "invalid format. use: !warden dr \"do something useful stinky\" yes 12:00pm [timezone] :loll:"
           });
           console.log("Slack API response (warden invalid format):", help);
           return new Response("ok", { status: 200 });
