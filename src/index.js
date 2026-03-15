@@ -352,7 +352,7 @@ export default {
           const deletedAll = await postSlackMessage(env, {
             channel,
             thread_ts,
-            text: `damn what did all the reminders do\n\n(deleted ${reminders.length} reminder${reminders.length === 1 ? "" : "s"})`
+            text: `damn what did all the reminders do?? :noooovanish:\n\n(deleted ${reminders.length} reminder${reminders.length === 1 ? "" : "s"})`
           });
           console.log("Slack API response (warden delete all):", deletedAll);
           return new Response("ok", { status: 200 });
@@ -378,7 +378,7 @@ export default {
           const deleted = await postSlackMessage(env, {
             channel,
             thread_ts,
-            text: `damn what did the reminder do\n\n(deleted reminder ${reminderId})`
+            text: `damn what did the reminder do? :noooovanish:\n\n(deleted reminder ${reminderId})`
           });
           console.log("Slack API response (warden delete):", deleted);
           return new Response("ok", { status: 200 });
