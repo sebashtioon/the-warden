@@ -12,7 +12,19 @@
 	},
 	"compatibility_flags": [
 		"nodejs_compat"
-	]
+	],
+	"kv_namespaces": [
+		{
+			"binding": "WARDEN_KV",
+			"id": "93778da726ef4fc6b90b5b857d848e88",
+			"preview_id": "f9488f1a6ed34fb596dba01b5b421645"
+		}
+	],
+	"triggers": {
+		"crons": [
+			"* * * * *"
+		]
+	}
 	/**
 	 * Smart Placement
 	 * https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement

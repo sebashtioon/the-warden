@@ -1,22 +1,36 @@
 const WARDEN_USER_ID = "U094HHPS5B8";
 const REMINDER_KV_KEY = "warden:daily_reminders";
 const DEFAULT_WARDEN_TIME_ZONE = "Australia/Sydney";
+const DEFAULT_WARDEN_TIME_ZONE_CODE = "AEDT";
 
-const normalizeTimeZone = (timeZoneToken) => {
-  if (!timeZoneToken) {
-    return DEFAULT_WARDEN_TIME_ZONE;
+const TIME_ZONE_ALIASES = {
+  AEDT: "AEDT",
+  AEST: "AEST",
+  UTC: "UTC",
+  GMT: "GMT"
+};
+
+const resolveTimeZone = (timeZoneToken) => {
+  const trimmed = (timeZoneToken || "").trim();
+  if (!trimmed) {
+    return {
+      timeZoneCode: DEFAULT_WARDEN_TIME_ZONE_CODE,
+      timeZone: DEFAULT_WARDEN_TIME_ZONE
+    };
   }
 
-  const aliases = {
-    AEDT: "Australia/Sydney",
-    AEST: "Australia/Sydney",
-    UTC: "Etc/UTC",
-    GMT: "Etc/UTC"
-  };
+  const upper = trimmed.toUpperCase();
+  if (TIME_ZONE_ALIASES[upper]) {
+    return {
+      timeZoneCode: upper,
+      timeZone: TIME_ZONE_ALIASES[upper]
+    };
+  }
 
-  const normalizedToken = timeZoneToken.trim();
-  const upper = normalizedToken.toUpperCase();
-  return aliases[upper] || normalizedToken;
+  return {
+    timeZoneCode: upper,
+    timeZone: trimmed
+  };
 };
 
 const isValidTimeZone = (timeZone) => {
@@ -38,8 +52,8 @@ const parseDailyReminderCommand = (rawText) => {
   const reminderText = match[1].trim();
   const pingWarden = match[2].toLowerCase() === "yes";
   const timeRaw = match[3].toLowerCase();
-  const timeZoneRaw = match[4] || "AEDT";
-  const timeZone = normalizeTimeZone(timeZoneRaw);
+  const timeZoneRaw = match[4] || DEFAULT_WARDEN_TIME_ZONE_CODE;
+  const { timeZoneCode, timeZone } = resolveTimeZone(timeZoneRaw);
   const timeMatch = timeRaw.match(/^(\d{1,2}):(\d{2})(am|pm)$/);
   if (!timeMatch) {
     return { ok: false, reason: "format" };
@@ -75,6 +89,7 @@ const parseDailyReminderCommand = (rawText) => {
     pingWarden,
     time24: `${hh}:${mm}`,
     timeRaw,
+    timeZoneCode,
     timeZone
   };
 };
@@ -117,7 +132,7 @@ const saveDailyReminders = async (env, reminders) => {
   await env.WARDEN_KV.put(REMINDER_KV_KEY, JSON.stringify(reminders));
 };
 
-const getNowInTimeZone = (timeZone) => {
+const getNowInTimeZone = (timeZone, date = new Date()) => {
   const formatter = new Intl.DateTimeFormat("en-US", {
     timeZone,
     year: "numeric",
@@ -128,7 +143,7 @@ const getNowInTimeZone = (timeZone) => {
     hour12: false
   });
 
-  const parts = formatter.formatToParts(new Date());
+  const parts = formatter.formatToParts(date);
   const pick = (type) => parts.find((p) => p.type === type)?.value || "";
   return {
     ymd: `${pick("year")}-${pick("month")}-${pick("day")}`,
@@ -270,6 +285,79 @@ export default {
           return new Response("ok", { status: 200 });
         }
 
+        if (!env.WARDEN_KV) {
+          const kvError = await postSlackMessage(env, {
+            channel,
+            thread_ts,
+            text: "i cant save reminders yet. bind a KV namespace as WARDEN_KV and redeploy."
+          });
+          console.log("Slack API response (warden missing kv):", kvError);
+          return new Response("ok", { status: 200 });
+        }
+
+        const trimmedText = rawText.trim();
+        const listMatch = trimmedText.match(/^!warden\s+dr-list$/i);
+        if (listMatch) {
+          const reminders = await loadDailyReminders(env);
+          if (!reminders.length) {
+            const emptyList = await postSlackMessage(env, {
+              channel,
+              thread_ts,
+              text: "alr bro heres your reminder list:\n\n(no reminders yet)"
+            });
+            console.log("Slack API response (warden list empty):", emptyList);
+            return new Response("ok", { status: 200 });
+          }
+
+          const lines = reminders.map((r, i) => `${i + 1}. id: ${r.id}\n   reminder: \"${r.text}\"\n   schedule: ${r.timeRaw} (${r.time24}) ${r.timeZoneCode || DEFAULT_WARDEN_TIME_ZONE_CODE}\n   ping warden: ${r.pingWarden ? "yes" : "no"}`);
+          const listResponse = await postSlackMessage(env, {
+            channel,
+            thread_ts,
+            text: `alr bro heres your reminder list:\n\n${lines.join("\n\n")}`
+          });
+          console.log("Slack API response (warden list):", listResponse);
+          return new Response("ok", { status: 200 });
+        }
+
+        const deleteAllMatch = trimmedText.match(/^!warden\s+dr-del-all$/i);
+        if (deleteAllMatch) {
+          const reminders = await loadDailyReminders(env);
+          await saveDailyReminders(env, []);
+          const deletedAll = await postSlackMessage(env, {
+            channel,
+            thread_ts,
+            text: `damn what did all the reminders do\n\n(deleted ${reminders.length} reminder${reminders.length === 1 ? "" : "s"})`
+          });
+          console.log("Slack API response (warden delete all):", deletedAll);
+          return new Response("ok", { status: 200 });
+        }
+
+        const deleteMatch = trimmedText.match(/^!warden\s+dr-del\s+([a-z0-9-]{8,})$/i);
+        if (deleteMatch) {
+          const reminderId = deleteMatch[1];
+          const reminders = await loadDailyReminders(env);
+          const nextReminders = reminders.filter((r) => r.id !== reminderId);
+
+          if (nextReminders.length === reminders.length) {
+            const missing = await postSlackMessage(env, {
+              channel,
+              thread_ts,
+              text: `no reminder found with id ${reminderId}`
+            });
+            console.log("Slack API response (warden delete missing):", missing);
+            return new Response("ok", { status: 200 });
+          }
+
+          await saveDailyReminders(env, nextReminders);
+          const deleted = await postSlackMessage(env, {
+            channel,
+            thread_ts,
+            text: `damn what did the reminder do\n\n(deleted reminder ${reminderId})`
+          });
+          console.log("Slack API response (warden delete):", deleted);
+          return new Response("ok", { status: 200 });
+        }
+
         const parsedCommand = parseDailyReminderCommand(rawText);
         if (!parsedCommand.ok) {
           if (parsedCommand.reason === "timezone") {
@@ -291,16 +379,6 @@ export default {
           return new Response("ok", { status: 200 });
         }
 
-        if (!env.WARDEN_KV) {
-          const kvError = await postSlackMessage(env, {
-            channel,
-            thread_ts,
-            text: "i cant save reminders yet. bind a KV namespace as WARDEN_KV and redeploy."
-          });
-          console.log("Slack API response (warden missing kv):", kvError);
-          return new Response("ok", { status: 200 });
-        }
-
         const reminders = await loadDailyReminders(env);
         const reminder = {
           id: crypto.randomUUID(),
@@ -309,6 +387,7 @@ export default {
           pingWarden: parsedCommand.pingWarden,
           time24: parsedCommand.time24,
           timeRaw: parsedCommand.timeRaw,
+          timeZoneCode: parsedCommand.timeZoneCode,
           timeZone: parsedCommand.timeZone,
           createdBy: event.user,
           createdAt: new Date().toISOString()
@@ -319,7 +398,7 @@ export default {
         const ack = await postSlackMessage(env, {
           channel,
           thread_ts,
-          text: `daily reminder saved: \"${reminder.text}\" at ${reminder.timeRaw} (${reminder.time24}) timezone=${reminder.timeZone} ping_warden=${reminder.pingWarden ? "yes" : "no"}`
+          text: `alr gng ive set a reminder for \"${reminder.text}\" at ${reminder.timeRaw} (${reminder.time24}) ${reminder.timeZoneCode}, and ping warden is ${reminder.pingWarden ? "on" : "off"}.`
         });
         console.log("Slack API response (warden saved):", ack);
         return new Response("ok", { status: 200 });
@@ -404,7 +483,7 @@ export default {
     return new Response("ok", { status: 200 });
   },
 
-  async scheduled(_controller, env) {
+  async scheduled(controller, env) {
     if (!env.WARDEN_KV || !env.SLACK_BOT_TOKEN) {
       console.log("Scheduled: missing WARDEN_KV or SLACK_BOT_TOKEN binding");
       return;
@@ -415,19 +494,29 @@ export default {
       return;
     }
 
+    const runDate = controller?.scheduledTime ? new Date(controller.scheduledTime) : new Date();
+    const prevMinuteDate = new Date(runDate.getTime() - 60_000);
+
     for (const reminder of reminders) {
-      const reminderTimeZone = reminder.timeZone || DEFAULT_WARDEN_TIME_ZONE;
+      const resolvedReminderTz = reminder.timeZone
+        ? reminder.timeZone
+        : resolveTimeZone(reminder.timeZoneCode).timeZone;
+      const reminderTimeZone = resolvedReminderTz || DEFAULT_WARDEN_TIME_ZONE;
       if (!isValidTimeZone(reminderTimeZone)) {
         console.log("Skipping reminder with invalid timezone:", reminder.id, reminderTimeZone);
         continue;
       }
 
-      const now = getNowInTimeZone(reminderTimeZone);
-      if (reminder.time24 !== now.hm) {
+      const now = getNowInTimeZone(reminderTimeZone, runDate);
+      const prevMinute = getNowInTimeZone(reminderTimeZone, prevMinuteDate);
+      const matchesCurrentMinute = reminder.time24 === now.hm;
+      const matchesPreviousMinute = reminder.time24 === prevMinute.hm;
+      if (!matchesCurrentMinute && !matchesPreviousMinute) {
         continue;
       }
 
-      const dedupeKey = `warden:daily_reminder_fired:${reminder.id}:${now.ymd}`;
+      const fireYmd = matchesCurrentMinute ? now.ymd : prevMinute.ymd;
+      const dedupeKey = `warden:daily_reminder_fired:${reminder.id}:${fireYmd}`;
       const alreadyFired = await env.WARDEN_KV.get(dedupeKey);
       if (alreadyFired) {
         continue;
