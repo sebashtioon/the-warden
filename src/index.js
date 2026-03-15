@@ -412,7 +412,7 @@ export default {
           const help = await postSlackMessage(env, {
             channel,
             thread_ts,
-            text: "invalid format. use: !warden dr \"do something useful stinky\" yes 12:00pm [timezone] :loll:"
+            text: "what the fuck is that command bro??? :loll:"
           });
           console.log("Slack API response (warden invalid format):", help);
           return new Response("ok", { status: 200 });
