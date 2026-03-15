@@ -211,6 +211,34 @@ const getNowInTimeZone = (timeZone, date = new Date()) => {
 
 export default {
   async fetch(request, env) {
+    // --- Grok AI call using fetch ---
+    async function getGrokReply(message) {
+      try {
+        const res = await fetch("https://ai.hackclub.com/proxy/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${env.HACKCLUB_AI_API_KEY}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            model: "x-ai/grok-4.1-fast",
+            messages: [
+              { role: "user", content: message }
+            ]
+          })
+        });
+        const data = await res.json();
+        if (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) {
+          return data.choices[0].message.content;
+        } else {
+          console.log("Grok API unexpected response:", data);
+          return "bruh, even the AI doesn't know what to say.";
+        }
+      } catch (err) {
+        console.log("Grok API error:", err);
+        return "bruh, even the AI doesn't know what to say.";
+      }
+    }
     let body;
     const contentType = request.headers.get("content-type") || "";
     try {
@@ -638,6 +666,26 @@ export default {
       }
 
       // keyword example: "skrillex"
+      if (text.includes("warden")) {
+        console.log("Keyword matched: warden, sending Grok AI reply...");
+        const aiReply = await getGrokReply(rawText);
+        const res = await fetch("https://slack.com/api/chat.postMessage", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${env.SLACK_BOT_TOKEN}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            channel: channel,
+            text: aiReply,
+            thread_ts: thread_ts
+          })
+        });
+        const data = await res.json();
+        console.log("Slack API response (warden AI):", data);
+      }
+
+      // Keep existing keyword replies
       if (text.includes("skrillex")) {
         console.log("Keyword matched: skrillex, sending reply...");
         const res = await fetch("https://slack.com/api/chat.postMessage", {

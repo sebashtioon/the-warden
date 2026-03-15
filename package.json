@@ -12,5 +12,8 @@
 		"@cloudflare/vitest-pool-workers": "^0.12.4",
 		"vitest": "~3.2.0",
 		"wrangler": "^4.73.0"
+	},
+	"dependencies": {
+		"@openrouter/sdk": "^0.9.11"
 	}
 }
