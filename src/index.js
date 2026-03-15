@@ -296,7 +296,7 @@ export default {
           const denied = await postSlackMessage(env, {
             channel,
             thread_ts,
-            text: ":no_entry: only the warden can configure reminders."
+            text: "ay look...\n\nthis guy really tried to use warden commands :loll:"
           });
           console.log("Slack API response (warden unauthorized):", denied);
           return new Response("ok", { status: 200 });
@@ -306,7 +306,7 @@ export default {
           const kvError = await postSlackMessage(env, {
             channel,
             thread_ts,
-            text: "i cant save reminders yet. bind a KV namespace as WARDEN_KV and redeploy."
+            text: "i cant save reminders yet. bind a KV namespace as WARDEN_KV and redeploy bozo"
           });
           console.log("Slack API response (warden missing kv):", kvError);
           return new Response("ok", { status: 200 });
