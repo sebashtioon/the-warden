@@ -2,12 +2,21 @@ const WARDEN_USER_ID = "U094HHPS5B8";
 const REMINDER_KV_KEY = "warden:daily_reminders";
 const DEFAULT_WARDEN_TIME_ZONE = "Australia/Sydney";
 const DEFAULT_WARDEN_TIME_ZONE_CODE = "AEDT";
+const COMMANDS_HELP_TEXT = [
+  "warden commands:",
+  "",
+  "- !warden dr \"text\" yes|no 12:00pm [timezone] -> create daily reminder",
+  "- !warden dr-list -> list all reminders",
+  "- !warden dr-del <id> -> delete one reminder",
+  "- !warden dr-del-all -> delete all reminders",
+  "- !warden help -> show this command list"
+].join("\n");
 
 const TIME_ZONE_ALIASES = {
-  AEDT: "AEDT",
-  AEST: "AEST",
-  UTC: "UTC",
-  GMT: "GMT"
+  AEDT: "Australia/Sydney",
+  AEST: "Australia/Sydney",
+  UTC: "Etc/UTC",
+  GMT: "Etc/UTC"
 };
 
 const resolveTimeZone = (timeZoneToken) => {
@@ -27,10 +36,7 @@ const resolveTimeZone = (timeZoneToken) => {
     };
   }
 
-  return {
-    timeZoneCode: upper,
-    timeZone: trimmed
-  };
+  return null;
 };
 
 const isValidTimeZone = (timeZone) => {
@@ -53,7 +59,16 @@ const parseDailyReminderCommand = (rawText) => {
   const pingWarden = match[2].toLowerCase() === "yes";
   const timeRaw = match[3].toLowerCase();
   const timeZoneRaw = match[4] || DEFAULT_WARDEN_TIME_ZONE_CODE;
-  const { timeZoneCode, timeZone } = resolveTimeZone(timeZoneRaw);
+  const resolvedTimeZone = resolveTimeZone(timeZoneRaw);
+  if (!resolvedTimeZone) {
+    return {
+      ok: false,
+      reason: "timezone_alias",
+      providedTimeZone: timeZoneRaw
+    };
+  }
+
+  const { timeZoneCode, timeZone } = resolvedTimeZone;
   const timeMatch = timeRaw.match(/^(\d{1,2}):(\d{2})(am|pm)$/);
   if (!timeMatch) {
     return { ok: false, reason: "format" };
@@ -270,11 +285,13 @@ export default {
       const channel = event.channel;
       const thread_ts = event.ts;
       const rawText = event.text || "";
+      const trimmedText = rawText.trim();
+      const normalizedText = trimmedText.toLowerCase();
 
       console.log(`Message in channel ${channel}: "${text}"`);
 
       // warden command: !warden dr "..." yes|no 12:00pm
-      if (rawText.trim().toLowerCase().startsWith("!warden")) {
+      if (normalizedText.startsWith("!warden")) {
         if (event.user !== WARDEN_USER_ID) {
           const denied = await postSlackMessage(env, {
             channel,
@@ -295,7 +312,16 @@ export default {
           return new Response("ok", { status: 200 });
         }
 
-        const trimmedText = rawText.trim();
+        if (normalizedText === "!warden help") {
+          const helpReply = await postSlackMessage(env, {
+            channel,
+            thread_ts,
+            text: COMMANDS_HELP_TEXT
+          });
+          console.log("Slack API response (warden help):", helpReply);
+          return new Response("ok", { status: 200 });
+        }
+
         const listMatch = trimmedText.match(/^!warden\s+dr-list$/i);
         if (listMatch) {
           const reminders = await loadDailyReminders(env);
@@ -360,11 +386,11 @@ export default {
 
         const parsedCommand = parseDailyReminderCommand(rawText);
         if (!parsedCommand.ok) {
-          if (parsedCommand.reason === "timezone") {
+          if (parsedCommand.reason === "timezone" || parsedCommand.reason === "timezone_alias") {
             const tzError = await postSlackMessage(env, {
               channel,
               thread_ts,
-              text: `invalid timezone: ${parsedCommand.providedTimeZone}. use an IANA timezone like Australia/Sydney or shorthand AEDT.`
+              text: `invalid timezone: ${parsedCommand.providedTimeZone}. use only aliases: AEDT, AEST, UTC, GMT.`
             });
             console.log("Slack API response (warden invalid timezone):", tzError);
             return new Response("ok", { status: 200 });
@@ -498,9 +524,11 @@ export default {
     const prevMinuteDate = new Date(runDate.getTime() - 60_000);
 
     for (const reminder of reminders) {
-      const resolvedReminderTz = reminder.timeZone
+      const resolvedByCode = resolveTimeZone(reminder.timeZoneCode || "");
+      const resolvedByStoredValue = resolveTimeZone(reminder.timeZone || "");
+      const resolvedReminderTz = isValidTimeZone(reminder.timeZone)
         ? reminder.timeZone
-        : resolveTimeZone(reminder.timeZoneCode).timeZone;
+        : (resolvedByCode?.timeZone || resolvedByStoredValue?.timeZone);
       const reminderTimeZone = resolvedReminderTz || DEFAULT_WARDEN_TIME_ZONE;
       if (!isValidTimeZone(reminderTimeZone)) {
         console.log("Skipping reminder with invalid timezone:", reminder.id, reminderTimeZone);
