@@ -348,11 +348,12 @@ export default {
         const deleteAllMatch = trimmedText.match(/^!warden\s+dr-del-all$/i);
         if (deleteAllMatch) {
           const reminders = await loadDailyReminders(env);
+          const hadNoReminders = reminders.length === 0;
           await saveDailyReminders(env, []);
           const deletedAll = await postSlackMessage(env, {
             channel,
             thread_ts,
-            text: `damn what did all the reminders do?? :noooovanish:\n\n(deleted ${reminders.length} reminder${reminders.length === 1 ? "" : "s"})`
+            text: `damn what did all the reminders do?? :noooovanish:\n\n(deleted ${reminders.length} reminder${reminders.length === 1 ? "" : "s"})${hadNoReminders ? " :loll:" : ""}`
           });
           console.log("Slack API response (warden delete all):", deletedAll);
           return new Response("ok", { status: 200 });
@@ -368,7 +369,7 @@ export default {
             const missing = await postSlackMessage(env, {
               channel,
               thread_ts,
-              text: `no reminder found with id ${reminderId}`
+              text: `no reminder found with id ${reminderId} :loll:`
             });
             console.log("Slack API response (warden delete missing):", missing);
             return new Response("ok", { status: 200 });
