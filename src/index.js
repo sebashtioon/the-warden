@@ -1,3 +1,141 @@
+const WARDEN_USER_ID = "U094HHPS5B8";
+const REMINDER_KV_KEY = "warden:daily_reminders";
+const DEFAULT_WARDEN_TIME_ZONE = "Australia/Sydney";
+
+const normalizeTimeZone = (timeZoneToken) => {
+  if (!timeZoneToken) {
+    return DEFAULT_WARDEN_TIME_ZONE;
+  }
+
+  const aliases = {
+    AEDT: "Australia/Sydney",
+    AEST: "Australia/Sydney",
+    UTC: "Etc/UTC",
+    GMT: "Etc/UTC"
+  };
+
+  const normalizedToken = timeZoneToken.trim();
+  const upper = normalizedToken.toUpperCase();
+  return aliases[upper] || normalizedToken;
+};
+
+const isValidTimeZone = (timeZone) => {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone }).format(new Date());
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const parseDailyReminderCommand = (rawText) => {
+  const text = rawText?.trim() || "";
+  const match = text.match(/^!warden\s+dr\s+"([^"]+)"\s+(yes|no)\s+([0-9]{1,2}:[0-9]{2}(?:am|pm))(?:\s+([A-Za-z_\/+\-]+))?$/i);
+  if (!match) {
+    return { ok: false, reason: "format" };
+  }
+
+  const reminderText = match[1].trim();
+  const pingWarden = match[2].toLowerCase() === "yes";
+  const timeRaw = match[3].toLowerCase();
+  const timeZoneRaw = match[4] || "AEDT";
+  const timeZone = normalizeTimeZone(timeZoneRaw);
+  const timeMatch = timeRaw.match(/^(\d{1,2}):(\d{2})(am|pm)$/);
+  if (!timeMatch) {
+    return { ok: false, reason: "format" };
+  }
+
+  let hour = Number(timeMatch[1]);
+  const minute = Number(timeMatch[2]);
+  const period = timeMatch[3];
+  if (hour < 1 || hour > 12 || minute < 0 || minute > 59) {
+    return { ok: false, reason: "format" };
+  }
+
+  if (!isValidTimeZone(timeZone)) {
+    return {
+      ok: false,
+      reason: "timezone",
+      providedTimeZone: timeZoneRaw
+    };
+  }
+
+  if (period === "am") {
+    if (hour === 12) hour = 0;
+  } else if (hour !== 12) {
+    hour += 12;
+  }
+
+  const hh = String(hour).padStart(2, "0");
+  const mm = String(minute).padStart(2, "0");
+
+  return {
+    ok: true,
+    reminderText,
+    pingWarden,
+    time24: `${hh}:${mm}`,
+    timeRaw,
+    timeZone
+  };
+};
+
+const postSlackMessage = async (env, payload) => {
+  const res = await fetch("https://slack.com/api/chat.postMessage", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${env.SLACK_BOT_TOKEN}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+  return res.json();
+};
+
+const loadDailyReminders = async (env) => {
+  if (!env.WARDEN_KV) {
+    return [];
+  }
+
+  const raw = await env.WARDEN_KV.get(REMINDER_KV_KEY);
+  if (!raw) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
+const saveDailyReminders = async (env, reminders) => {
+  if (!env.WARDEN_KV) {
+    return;
+  }
+
+  await env.WARDEN_KV.put(REMINDER_KV_KEY, JSON.stringify(reminders));
+};
+
+const getNowInTimeZone = (timeZone) => {
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  });
+
+  const parts = formatter.formatToParts(new Date());
+  const pick = (type) => parts.find((p) => p.type === type)?.value || "";
+  return {
+    ymd: `${pick("year")}-${pick("month")}-${pick("day")}`,
+    hm: `${pick("hour")}:${pick("minute")}`
+  };
+};
+
 export default {
   async fetch(request, env) {
     let body;
@@ -36,7 +174,8 @@ export default {
     const event = body.event;
     const rulesCanvasUrl = env.RULES_CANVAS_URL || "https://hackclub.enterprise.slack.com/docs/T0266FRGM/F0AL6S8QWFR";
     const joinTestChannelId = "C0ALRPWUTC4";
-    const joinAnnounceChannel = env.JOIN_ANNOUNCE_CHANNEL || "C0A7JH50JG4";
+    const joinAnnounceChannelId = env.JOIN_ANNOUNCE_CHANNEL_ID || "C0A7JH50JG4";
+    const joinAnnounceChannel = env.JOIN_ANNOUNCE_CHANNEL || joinAnnounceChannelId;
 
     const buildWelcomeMessage = (userId) => ({
       text: `welcome to the basement <@${userId}>`,
@@ -100,12 +239,12 @@ export default {
     };
 
     // ---------------------------
-    // Handle new member joins
+    // Handle users joining the public announce channel
     // ---------------------------
-    if (event && event.type === "team_join") {
-      const user = event.user.id;
-      console.log("New member joined:", user);
-      await sendWelcomeAndRulesThread(joinAnnounceChannel, user, "join");
+    if (event && event.type === "member_joined_channel" && event.channel === joinAnnounceChannelId) {
+      const user = event.user;
+      console.log("User joined announce channel:", user, "channel:", event.channel);
+      await sendWelcomeAndRulesThread(joinAnnounceChannel, user, "member_joined_channel");
     }
 
     // ---------------------------
@@ -115,8 +254,76 @@ export default {
       const text = event.text?.toLowerCase() || "";
       const channel = event.channel;
       const thread_ts = event.ts;
+      const rawText = event.text || "";
 
       console.log(`Message in channel ${channel}: "${text}"`);
+
+      // warden command: !warden dr "..." yes|no 12:00pm
+      if (rawText.trim().toLowerCase().startsWith("!warden")) {
+        if (event.user !== WARDEN_USER_ID) {
+          const denied = await postSlackMessage(env, {
+            channel,
+            thread_ts,
+            text: ":no_entry: only the warden can configure reminders."
+          });
+          console.log("Slack API response (warden unauthorized):", denied);
+          return new Response("ok", { status: 200 });
+        }
+
+        const parsedCommand = parseDailyReminderCommand(rawText);
+        if (!parsedCommand.ok) {
+          if (parsedCommand.reason === "timezone") {
+            const tzError = await postSlackMessage(env, {
+              channel,
+              thread_ts,
+              text: `invalid timezone: ${parsedCommand.providedTimeZone}. use an IANA timezone like Australia/Sydney or shorthand AEDT.`
+            });
+            console.log("Slack API response (warden invalid timezone):", tzError);
+            return new Response("ok", { status: 200 });
+          }
+
+          const help = await postSlackMessage(env, {
+            channel,
+            thread_ts,
+            text: "invalid format. use: !warden dr \"do something useful stinky\" yes 12:00pm [timezone]"
+          });
+          console.log("Slack API response (warden invalid format):", help);
+          return new Response("ok", { status: 200 });
+        }
+
+        if (!env.WARDEN_KV) {
+          const kvError = await postSlackMessage(env, {
+            channel,
+            thread_ts,
+            text: "i cant save reminders yet. bind a KV namespace as WARDEN_KV and redeploy."
+          });
+          console.log("Slack API response (warden missing kv):", kvError);
+          return new Response("ok", { status: 200 });
+        }
+
+        const reminders = await loadDailyReminders(env);
+        const reminder = {
+          id: crypto.randomUUID(),
+          channel,
+          text: parsedCommand.reminderText,
+          pingWarden: parsedCommand.pingWarden,
+          time24: parsedCommand.time24,
+          timeRaw: parsedCommand.timeRaw,
+          timeZone: parsedCommand.timeZone,
+          createdBy: event.user,
+          createdAt: new Date().toISOString()
+        };
+        reminders.push(reminder);
+        await saveDailyReminders(env, reminders);
+
+        const ack = await postSlackMessage(env, {
+          channel,
+          thread_ts,
+          text: `daily reminder saved: \"${reminder.text}\" at ${reminder.timeRaw} (${reminder.time24}) timezone=${reminder.timeZone} ping_warden=${reminder.pingWarden ? "yes" : "no"}`
+        });
+        console.log("Slack API response (warden saved):", ack);
+        return new Response("ok", { status: 200 });
+      }
 
       // keyword example: "skrillex"
       if (text.includes("skrillex")) {
@@ -135,6 +342,30 @@ export default {
         });
         const data = await res.json();
         console.log("Slack API response (keyword):", data);
+      }
+
+      if (text.includes("bangarang")) {
+        console.log("Keyword matched: bangarang, sending random reply...");
+        const bangarangReplies = [
+          "bass",
+          "salsa on my balls boys, weed brownie"
+        ];
+        const randomReply = bangarangReplies[Math.floor(Math.random() * bangarangReplies.length)];
+
+        const res = await fetch("https://slack.com/api/chat.postMessage", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${env.SLACK_BOT_TOKEN}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            channel: channel,
+            text: randomReply,
+            thread_ts: thread_ts
+          })
+        });
+        const data = await res.json();
+        console.log("Slack API response (bangarang keyword):", data);
       }
       
         // test: respond with join message if 'join_test' is in the basement channel only
@@ -171,5 +402,48 @@ export default {
     }
 
     return new Response("ok", { status: 200 });
+  },
+
+  async scheduled(_controller, env) {
+    if (!env.WARDEN_KV || !env.SLACK_BOT_TOKEN) {
+      console.log("Scheduled: missing WARDEN_KV or SLACK_BOT_TOKEN binding");
+      return;
+    }
+
+    const reminders = await loadDailyReminders(env);
+    if (!reminders.length) {
+      return;
+    }
+
+    for (const reminder of reminders) {
+      const reminderTimeZone = reminder.timeZone || DEFAULT_WARDEN_TIME_ZONE;
+      if (!isValidTimeZone(reminderTimeZone)) {
+        console.log("Skipping reminder with invalid timezone:", reminder.id, reminderTimeZone);
+        continue;
+      }
+
+      const now = getNowInTimeZone(reminderTimeZone);
+      if (reminder.time24 !== now.hm) {
+        continue;
+      }
+
+      const dedupeKey = `warden:daily_reminder_fired:${reminder.id}:${now.ymd}`;
+      const alreadyFired = await env.WARDEN_KV.get(dedupeKey);
+      if (alreadyFired) {
+        continue;
+      }
+
+      const pingPrefix = reminder.pingWarden ? `<@${WARDEN_USER_ID}> ` : "";
+      const payload = {
+        channel: reminder.channel,
+        text: `${pingPrefix}${reminder.text}`
+      };
+      const data = await postSlackMessage(env, payload);
+      console.log("Slack API response (daily reminder):", data);
+
+      if (data.ok) {
+        await env.WARDEN_KV.put(dedupeKey, "1", { expirationTtl: 172800 });
+      }
+    }
   }
 };
