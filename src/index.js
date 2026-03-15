@@ -2,6 +2,10 @@ const WARDEN_USER_ID = "U094HHPS5B8";
 const REMINDER_KV_KEY = "warden:daily_reminders";
 const DEFAULT_WARDEN_TIME_ZONE = "Australia/Sydney";
 const DEFAULT_WARDEN_TIME_ZONE_CODE = "AEDT";
+const WARDEN_TYPE_SHORTCUT_CALLBACK_ID = "warden_type_shortcut";
+const WARDEN_TYPE_MODAL_CALLBACK_ID = "warden_type_modal";
+const WARDEN_TYPE_MODAL_BLOCK_ID = "warden_type_block";
+const WARDEN_TYPE_MODAL_ACTION_ID = "warden_type_input";
 const COMMANDS_HELP_TEXT = [
   "warden commands:",
   "",
@@ -110,8 +114,8 @@ const parseDailyReminderCommand = (rawText) => {
   };
 };
 
-const postSlackMessage = async (env, payload) => {
-  const res = await fetch("https://slack.com/api/chat.postMessage", {
+const callSlackApi = async (env, method, payload) => {
+  const res = await fetch(`https://slack.com/api/${method}`, {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${env.SLACK_BOT_TOKEN}`,
@@ -121,6 +125,44 @@ const postSlackMessage = async (env, payload) => {
   });
   return res.json();
 };
+
+const postSlackMessage = async (env, payload) => {
+  return callSlackApi(env, "chat.postMessage", payload);
+};
+
+const buildWardenTypeModal = (privateMetadata, initialText = "") => ({
+  type: "modal",
+  callback_id: WARDEN_TYPE_MODAL_CALLBACK_ID,
+  private_metadata: JSON.stringify(privateMetadata),
+  title: {
+    type: "plain_text",
+    text: "Warden Type"
+  },
+  submit: {
+    type: "plain_text",
+    text: "Send"
+  },
+  close: {
+    type: "plain_text",
+    text: "Cancel"
+  },
+  blocks: [
+    {
+      type: "input",
+      block_id: WARDEN_TYPE_MODAL_BLOCK_ID,
+      label: {
+        type: "plain_text",
+        text: "Message"
+      },
+      element: {
+        type: "plain_text_input",
+        action_id: WARDEN_TYPE_MODAL_ACTION_ID,
+        multiline: true,
+        initial_value: initialText
+      }
+    }
+  ]
+});
 
 const loadDailyReminders = async (env) => {
   if (!env.WARDEN_KV) {
@@ -202,12 +244,85 @@ export default {
       return new Response(body.challenge, { status: 200 });
     }
 
+    // ---------------------------
+    // Message shortcut -> open Warden type modal
+    // ---------------------------
+    if (body.type === "message_action" && body.callback_id === WARDEN_TYPE_SHORTCUT_CALLBACK_ID) {
+      if (body.user?.id !== WARDEN_USER_ID) {
+        return new Response("", { status: 200 });
+      }
+
+      const privateMetadata = {
+        channel: body.channel?.id,
+        thread_ts: body.message?.thread_ts || body.message?.ts || body.message_ts || null
+      };
+      const openData = await callSlackApi(env, "views.open", {
+        trigger_id: body.trigger_id,
+        view: buildWardenTypeModal(privateMetadata, body.message?.text || "")
+      });
+      console.log("Slack API response (warden type modal open):", openData);
+      return new Response("", { status: 200 });
+    }
+
+    // ---------------------------
+    // Modal submit -> post as Warden in channel/thread
+    // ---------------------------
+    if (body.type === "view_submission" && body.view?.callback_id === WARDEN_TYPE_MODAL_CALLBACK_ID) {
+      if (body.user?.id !== WARDEN_USER_ID) {
+        return new Response(JSON.stringify({
+          response_action: "errors",
+          errors: {
+            [WARDEN_TYPE_MODAL_BLOCK_ID]: "only warden can use this"
+          }
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+
+      const modalText = body.view?.state?.values?.[WARDEN_TYPE_MODAL_BLOCK_ID]?.[WARDEN_TYPE_MODAL_ACTION_ID]?.value?.trim() || "";
+      if (!modalText) {
+        return new Response(JSON.stringify({
+          response_action: "errors",
+          errors: {
+            [WARDEN_TYPE_MODAL_BLOCK_ID]: "message cant be empty"
+          }
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+
+      let privateMetadata = {};
+      try {
+        privateMetadata = JSON.parse(body.view?.private_metadata || "{}");
+      } catch {
+        privateMetadata = {};
+      }
+
+      const payload = {
+        channel: privateMetadata.channel,
+        text: modalText
+      };
+      if (privateMetadata.thread_ts) {
+        payload.thread_ts = privateMetadata.thread_ts;
+      }
+
+      const sent = await postSlackMessage(env, payload);
+      console.log("Slack API response (warden type modal send):", sent);
+      return new Response(JSON.stringify({ response_action: "clear" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
     const isSlashCommand = body.command === "/warden";
     const slashCommandEvent = isSlashCommand
       ? {
           type: "message",
           user: body.user_id,
           channel: body.channel_id,
+          thread_ts: body.thread_ts,
           text: `!warden ${(body.text || "").trim()}`
         }
       : null;
@@ -295,7 +410,7 @@ export default {
     if (event && event.type === "message" && !event.bot_id && !event.subtype) {
       const text = event.text?.toLowerCase() || "";
       const channel = event.channel;
-      const thread_ts = event.ts;
+      const thread_ts = event.thread_ts || event.ts;
       const rawText = event.text || "";
       const trimmedText = rawText.trim();
       const normalizedText = trimmedText.toLowerCase();
@@ -339,23 +454,26 @@ export default {
 
           const typed = await postSlackMessage(env, {
             channel,
+            thread_ts,
             text: typeText
           });
           console.log("Slack API response (warden type post):", typed);
 
-          const deleteRes = await fetch("https://slack.com/api/chat.delete", {
-            method: "POST",
-            headers: {
-              "Authorization": `Bearer ${env.SLACK_BOT_TOKEN}`,
-              "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-              channel,
-              ts: event.ts
-            })
-          });
-          const deleteData = await deleteRes.json();
-          console.log("Slack API response (warden type delete command):", deleteData);
+          if (event.ts) {
+            const deleteRes = await fetch("https://slack.com/api/chat.delete", {
+              method: "POST",
+              headers: {
+                "Authorization": `Bearer ${env.SLACK_BOT_TOKEN}`,
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({
+                channel,
+                ts: event.ts
+              })
+            });
+            const deleteData = await deleteRes.json();
+            console.log("Slack API response (warden type delete command):", deleteData);
+          }
           return ack();
         }
 
@@ -364,6 +482,7 @@ export default {
         if (wardenRestText && !isKnownSubcommand) {
           const typed = await postSlackMessage(env, {
             channel,
+            thread_ts,
             text: wardenRestText
           });
           console.log("Slack API response (warden inferred type post):", typed);
