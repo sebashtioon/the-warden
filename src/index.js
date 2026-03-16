@@ -463,6 +463,12 @@ export default {
       const trimmedText = rawText.trim();
       const normalizedText = trimmedText.toLowerCase();
 
+      // NEW: ignore messages prefixed with "##"
+      if (normalizedText.startsWith("##")) {
+        console.log("Ignoring ##-prefixed message");
+        return ack();
+      }
+
       console.log(`Message in channel ${channel}: "${text}"`);
 
       // warden command: !warden dr "..." yes|no 12:00pm
@@ -615,7 +621,11 @@ export default {
           const nextReminders = reminders.filter((r) => r.id !== reminderId);
 
           if (nextReminders.length === reminders.length) {
-            const missing = await postSlackMessage(env, { channel, thread_ts, text: `no reminder found with id ${reminderId} :loll:` });
+            const missing = await postSlackMessage(env, {
+              channel,
+              thread_ts,
+              text: `no reminder found with id ${reminderId} :loll:`,
+            });
             console.log("Slack API response (warden delete missing):", missing);
             return ack();
           }
