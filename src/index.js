@@ -1,4 +1,4 @@
-import SYSTEM_PROMPT from "../prompts/prompt.md";
+import SYSTEM_PROMPT from "../prompt/prompt.md";
 
 // Helper to check if bot is mentioned
 function isWardenMentioned(text, wardenUserId) {
