@@ -716,8 +716,23 @@ export default {
 
       if (shouldReply) {
         console.log("Warden reply triggered (mention or thread participation)...");
-        const aiReplyRaw = await getGrokReply(rawText);
-        // Only use the first phrase/line from the AI response
+        const channel = event.channel;
+        const thread_ts = event.thread_ts || event.ts;
+
+        // load history for this thread
+        const history = await loadThreadMessages(env, channel, thread_ts);
+
+        // add the new user message WITH the user id so the model knows who spoke
+        history.push({ role: "user", content: `<@${event.user}>: ${rawText}` });
+
+        // call grok with the full history
+        const aiReplyRaw = await getGrokReply(env, history);
+
+        // store assistant reply back into history
+        history.push({ role: "assistant", content: aiReplyRaw });
+
+        // persist
+        await saveThreadMessages(env, channel, thread_ts, history);
         let aiReply = aiReplyRaw.split(/[\n\.\!\?]/)[0].trim();
         if (!aiReply) aiReply = aiReplyRaw.trim();
         const res = await fetch("https://slack.com/api/chat.postMessage", {
