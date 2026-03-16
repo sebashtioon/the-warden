@@ -246,6 +246,7 @@ export default {
           body: JSON.stringify({
             model: "moonshotai/kimi-k2-0905",
             messages: [
+              // important
               { role: "system", content: SYSTEM_PROMPT },
               { role: "user", content: message }
             ]
@@ -719,49 +720,6 @@ export default {
         const data = await res.json();
         console.log("Slack API response (warden AI):", data);
         await markWardenReplied(env, channel, thread_ts);
-      }
-
-      // Keep existing keyword replies
-      if (text.includes("skrillex")) {
-        console.log("Keyword matched: skrillex, sending reply...");
-        const res = await fetch("https://slack.com/api/chat.postMessage", {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${env.SLACK_BOT_TOKEN}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            channel: channel,
-            text: "THE GOAT",
-            thread_ts: thread_ts
-          })
-        });
-        const data = await res.json();
-        console.log("Slack API response (keyword):", data);
-      }
-
-      if (text.includes("bangarang")) {
-        console.log("Keyword matched: bangarang, sending random reply...");
-        const bangarangReplies = [
-          "bass",
-          "salsa on my balls boys, weed brownie"
-        ];
-        const randomReply = bangarangReplies[Math.floor(Math.random() * bangarangReplies.length)];
-
-        const res = await fetch("https://slack.com/api/chat.postMessage", {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${env.SLACK_BOT_TOKEN}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            channel: channel,
-            text: randomReply,
-            thread_ts: thread_ts
-          })
-        });
-        const data = await res.json();
-        console.log("Slack API response (bangarang keyword):", data);
       }
       
         // test: respond with join message if 'join_test' is in the basement channel only
