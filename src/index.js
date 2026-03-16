@@ -260,34 +260,24 @@ const getNowInTimeZone = (timeZone, date = new Date()) => {
 export default {
   async fetch(request, env) {
     // --- Grok AI call using fetch ---
-    async function getGrokReply(message) {
-      try {
-        const res = await fetch("https://ai.hackclub.com/proxy/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${env.HACKCLUB_AI_API_KEY}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            model: "moonshotai/kimi-k2-0905",
-            messages: [
-              // important
-              { role: "system", content: SYSTEM_PROMPT },
-              { role: "user", content: message }
-            ]
-          })
-        });
-        const data = await res.json();
-        if (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) {
-          return data.choices[0].message.content;
-        } else {
-          console.log("Grok API unexpected response:", data);
-          return "bruh, even the AI doesn't know what to say.";
-        }
-      } catch (err) {
-        console.log("Grok API error:", err);
-        return "bruh, even the AI doesn't know what to say.";
-      }
+    async function getGrokReply(env, messages) {
+      const res = await fetch("https://ai.hackclub.com/proxy/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${env.HACKCLUB_AI_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "moonshotai/kimi-k2-0905",
+          messages: [
+            { role: "system", content: SYSTEM_PROMPT },
+            ...messages,
+          ],
+        }),
+      });
+
+      const data = await res.json();
+      return data?.choices?.[0]?.message?.content ?? "bruh, even the AI doesn't know what to say.";
     }
     let body;
     const contentType = request.headers.get("content-type") || "";
