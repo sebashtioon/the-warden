@@ -1,5 +1,30 @@
 import SYSTEM_PROMPT from "../prompt/prompt.md";
 
+const THREAD_MEMORY_TTL_SECONDS = 60 * 60 * 24; // 1 day
+const THREAD_MEMORY_MAX_MESSAGES = 20;
+
+const threadKey = (channel, thread_ts) => `warden:thread:${channel}:${thread_ts}`;
+
+async function loadThreadMessages(env, channel, thread_ts) {
+  if (!env.WARDEN_KV) return [];
+  const raw = await env.WARDEN_KV.get(threadKey(channel, thread_ts));
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+async function saveThreadMessages(env, channel, thread_ts, messages) {
+  if (!env.WARDEN_KV) return;
+  const trimmed = messages.slice(-THREAD_MEMORY_MAX_MESSAGES);
+  await env.WARDEN_KV.put(threadKey(channel, thread_ts), JSON.stringify(trimmed), {
+    expirationTtl: THREAD_MEMORY_TTL_SECONDS,
+  });
+}
+
 // Helper to check if bot is mentioned
 function isWardenMentioned(text, wardenUserId) {
   if (!text) return false;
