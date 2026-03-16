@@ -7,6 +7,8 @@ const threadKey = (channel, thread_ts) => `warden:thread:${channel}:${thread_ts}
 
 async function loadThreadMessages(env, channel, thread_ts) {
   if (!env.WARDEN_KV) return [];
+  if (!channel || !thread_ts) return [];
+
   const raw = await env.WARDEN_KV.get(threadKey(channel, thread_ts));
   if (!raw) return [];
   try {
@@ -19,6 +21,8 @@ async function loadThreadMessages(env, channel, thread_ts) {
 
 async function saveThreadMessages(env, channel, thread_ts, messages) {
   if (!env.WARDEN_KV) return;
+  if (!channel || !thread_ts) return;
+
   const trimmed = messages.slice(-THREAD_MEMORY_MAX_MESSAGES);
   await env.WARDEN_KV.put(threadKey(channel, thread_ts), JSON.stringify(trimmed), {
     expirationTtl: THREAD_MEMORY_TTL_SECONDS,
@@ -46,6 +50,7 @@ async function markWardenReplied(env, channel, thread_ts) {
   const repliedKey = `warden:replied:${channel}:${thread_ts}`;
   await env.WARDEN_KV.put(repliedKey, "1", { expirationTtl: 86400 }); // expire after 1 day
 }
+
 const WARDEN_USER_ID = "U094HHPS5B8";
 const REMINDER_KV_KEY = "warden:daily_reminders";
 const DEFAULT_WARDEN_TIME_ZONE = "Australia/Sydney";
@@ -54,22 +59,23 @@ const WARDEN_TYPE_SHORTCUT_CALLBACK_ID = "warden_type_shortcut";
 const WARDEN_TYPE_MODAL_CALLBACK_ID = "warden_type_modal";
 const WARDEN_TYPE_MODAL_BLOCK_ID = "warden_type_block";
 const WARDEN_TYPE_MODAL_ACTION_ID = "warden_type_input";
+
 const COMMANDS_HELP_TEXT = [
   "warden commands:",
   "",
-  "- !warden dr \"text\" yes|no 12:00pm [timezone] -> create daily reminder",
+  '- !warden dr "text" yes|no 12:00pm [timezone] -> create daily reminder',
   "- !warden dr-list -> list all reminders",
   "- !warden dr-del <id> -> delete one reminder",
   "- !warden dr-del-all -> delete all reminders",
   "- !warden type <text> -> post as warden bot and delete your command",
-  "- !warden help -> show this command list"
+  "- !warden help -> show this command list",
 ].join("\n");
 
 const TIME_ZONE_ALIASES = {
   AEDT: "Australia/Sydney",
   AEST: "Australia/Sydney",
   UTC: "Etc/UTC",
-  GMT: "Etc/UTC"
+  GMT: "Etc/UTC",
 };
 
 const resolveTimeZone = (timeZoneToken) => {
@@ -77,7 +83,7 @@ const resolveTimeZone = (timeZoneToken) => {
   if (!trimmed) {
     return {
       timeZoneCode: DEFAULT_WARDEN_TIME_ZONE_CODE,
-      timeZone: DEFAULT_WARDEN_TIME_ZONE
+      timeZone: DEFAULT_WARDEN_TIME_ZONE,
     };
   }
 
@@ -85,7 +91,7 @@ const resolveTimeZone = (timeZoneToken) => {
   if (TIME_ZONE_ALIASES[upper]) {
     return {
       timeZoneCode: upper,
-      timeZone: TIME_ZONE_ALIASES[upper]
+      timeZone: TIME_ZONE_ALIASES[upper],
     };
   }
 
@@ -103,7 +109,9 @@ const isValidTimeZone = (timeZone) => {
 
 const parseDailyReminderCommand = (rawText) => {
   const text = rawText?.trim() || "";
-  const match = text.match(/^!warden\s+dr\s+"([^"]+)"\s+(yes|no)\s+([0-9]{1,2}:[0-9]{2}(?:am|pm))(?:\s+([A-Za-z_\/+\-]+))?$/i);
+  const match = text.match(
+    /^!warden\s+dr\s+"([^"]+)"\s+(yes|no)\s+([0-9]{1,2}:[0-9]{2}(?:am|pm))(?:\s+([A-Za-z_\/+\-]+))?$/i
+  );
   if (!match) {
     return { ok: false, reason: "format" };
   }
@@ -112,12 +120,13 @@ const parseDailyReminderCommand = (rawText) => {
   const pingWarden = match[2].toLowerCase() === "yes";
   const timeRaw = match[3].toLowerCase();
   const timeZoneRaw = match[4] || DEFAULT_WARDEN_TIME_ZONE_CODE;
+
   const resolvedTimeZone = resolveTimeZone(timeZoneRaw);
   if (!resolvedTimeZone) {
     return {
       ok: false,
       reason: "timezone_alias",
-      providedTimeZone: timeZoneRaw
+      providedTimeZone: timeZoneRaw,
     };
   }
 
@@ -130,6 +139,7 @@ const parseDailyReminderCommand = (rawText) => {
   let hour = Number(timeMatch[1]);
   const minute = Number(timeMatch[2]);
   const period = timeMatch[3];
+
   if (hour < 1 || hour > 12 || minute < 0 || minute > 59) {
     return { ok: false, reason: "format" };
   }
@@ -138,7 +148,7 @@ const parseDailyReminderCommand = (rawText) => {
     return {
       ok: false,
       reason: "timezone",
-      providedTimeZone: timeZoneRaw
+      providedTimeZone: timeZoneRaw,
     };
   }
 
@@ -158,7 +168,7 @@ const parseDailyReminderCommand = (rawText) => {
     time24: `${hh}:${mm}`,
     timeRaw,
     timeZoneCode,
-    timeZone
+    timeZone,
   };
 };
 
@@ -166,10 +176,10 @@ const callSlackApi = async (env, method, payload) => {
   const res = await fetch(`https://slack.com/api/${method}`, {
     method: "POST",
     headers: {
-      "Authorization": `Bearer ${env.SLACK_BOT_TOKEN}`,
-      "Content-Type": "application/json"
+      Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
+      "Content-Type": "application/json",
     },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
   });
   return res.json();
 };
@@ -182,45 +192,29 @@ const buildWardenTypeModal = (privateMetadata, initialText = "") => ({
   type: "modal",
   callback_id: WARDEN_TYPE_MODAL_CALLBACK_ID,
   private_metadata: JSON.stringify(privateMetadata),
-  title: {
-    type: "plain_text",
-    text: "Warden Type"
-  },
-  submit: {
-    type: "plain_text",
-    text: "Send"
-  },
-  close: {
-    type: "plain_text",
-    text: "Cancel"
-  },
+  title: { type: "plain_text", text: "Warden Type" },
+  submit: { type: "plain_text", text: "Send" },
+  close: { type: "plain_text", text: "Cancel" },
   blocks: [
     {
       type: "input",
       block_id: WARDEN_TYPE_MODAL_BLOCK_ID,
-      label: {
-        type: "plain_text",
-        text: "Message"
-      },
+      label: { type: "plain_text", text: "Message" },
       element: {
         type: "plain_text_input",
         action_id: WARDEN_TYPE_MODAL_ACTION_ID,
         multiline: true,
-        initial_value: initialText
-      }
-    }
-  ]
+        initial_value: initialText,
+      },
+    },
+  ],
 });
 
 const loadDailyReminders = async (env) => {
-  if (!env.WARDEN_KV) {
-    return [];
-  }
+  if (!env.WARDEN_KV) return [];
 
   const raw = await env.WARDEN_KV.get(REMINDER_KV_KEY);
-  if (!raw) {
-    return [];
-  }
+  if (!raw) return [];
 
   try {
     const parsed = JSON.parse(raw);
@@ -231,10 +225,7 @@ const loadDailyReminders = async (env) => {
 };
 
 const saveDailyReminders = async (env, reminders) => {
-  if (!env.WARDEN_KV) {
-    return;
-  }
-
+  if (!env.WARDEN_KV) return;
   await env.WARDEN_KV.put(REMINDER_KV_KEY, JSON.stringify(reminders));
 };
 
@@ -246,14 +237,14 @@ const getNowInTimeZone = (timeZone, date = new Date()) => {
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
-    hour12: false
+    hour12: false,
   });
 
   const parts = formatter.formatToParts(date);
   const pick = (type) => parts.find((p) => p.type === type)?.value || "";
   return {
     ymd: `${pick("year")}-${pick("month")}-${pick("day")}`,
-    hm: `${pick("hour")}:${pick("minute")}`
+    hm: `${pick("hour")}:${pick("minute")}`,
   };
 };
 
@@ -261,26 +252,30 @@ export default {
   async fetch(request, env) {
     // --- Grok AI call using fetch ---
     async function getGrokReply(env, messages) {
-      const res = await fetch("https://ai.hackclub.com/proxy/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${env.HACKCLUB_AI_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "moonshotai/kimi-k2-0905",
-          messages: [
-            { role: "system", content: SYSTEM_PROMPT },
-            ...messages,
-          ],
-        }),
-      });
+      try {
+        const res = await fetch("https://ai.hackclub.com/proxy/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${env.HACKCLUB_AI_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "moonshotai/kimi-k2-0905",
+            messages: [{ role: "system", content: SYSTEM_PROMPT }, ...(messages || [])],
+          }),
+        });
 
-      const data = await res.json();
-      return data?.choices?.[0]?.message?.content ?? "bruh, even the AI doesn't know what to say.";
+        const data = await res.json();
+        return data?.choices?.[0]?.message?.content ?? "bruh, even the AI doesn't know what to say.";
+      } catch (err) {
+        console.log("Grok API error:", err);
+        return "bruh, even the AI doesn't know what to say.";
+      }
     }
+
     let body;
     const contentType = request.headers.get("content-type") || "";
+
     try {
       if (contentType.includes("application/json")) {
         body = await request.json();
@@ -305,16 +300,12 @@ export default {
     // log every event Slack sends
     console.log("Received Slack event:", JSON.stringify(body));
 
-    // ---------------------------
     // Slack URL verification
-    // ---------------------------
     if (body.type === "url_verification") {
       return new Response(body.challenge, { status: 200 });
     }
 
-    // ---------------------------
     // Message shortcut -> open Warden type modal
-    // ---------------------------
     if (body.type === "message_action" && body.callback_id === WARDEN_TYPE_SHORTCUT_CALLBACK_ID) {
       if (body.user?.id !== WARDEN_USER_ID) {
         return new Response("", { status: 200 });
@@ -322,43 +313,41 @@ export default {
 
       const privateMetadata = {
         channel: body.channel?.id,
-        thread_ts: body.message?.thread_ts || body.message?.ts || body.message_ts || null
+        thread_ts: body.message?.thread_ts || body.message?.ts || body.message_ts || null,
       };
+
       const openData = await callSlackApi(env, "views.open", {
         trigger_id: body.trigger_id,
-        view: buildWardenTypeModal(privateMetadata, body.message?.text || "")
+        view: buildWardenTypeModal(privateMetadata, body.message?.text || ""),
       });
+
       console.log("Slack API response (warden type modal open):", openData);
       return new Response("", { status: 200 });
     }
 
-    // ---------------------------
     // Modal submit -> post as Warden in channel/thread
-    // ---------------------------
     if (body.type === "view_submission" && body.view?.callback_id === WARDEN_TYPE_MODAL_CALLBACK_ID) {
       if (body.user?.id !== WARDEN_USER_ID) {
-        return new Response(JSON.stringify({
-          response_action: "errors",
-          errors: {
-            [WARDEN_TYPE_MODAL_BLOCK_ID]: "only warden can use this"
-          }
-        }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" }
-        });
+        return new Response(
+          JSON.stringify({
+            response_action: "errors",
+            errors: { [WARDEN_TYPE_MODAL_BLOCK_ID]: "only warden can use this" },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
       }
 
-      const modalText = body.view?.state?.values?.[WARDEN_TYPE_MODAL_BLOCK_ID]?.[WARDEN_TYPE_MODAL_ACTION_ID]?.value?.trim() || "";
+      const modalText =
+        body.view?.state?.values?.[WARDEN_TYPE_MODAL_BLOCK_ID]?.[WARDEN_TYPE_MODAL_ACTION_ID]?.value?.trim() || "";
+
       if (!modalText) {
-        return new Response(JSON.stringify({
-          response_action: "errors",
-          errors: {
-            [WARDEN_TYPE_MODAL_BLOCK_ID]: "message cant be empty"
-          }
-        }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" }
-        });
+        return new Response(
+          JSON.stringify({
+            response_action: "errors",
+            errors: { [WARDEN_TYPE_MODAL_BLOCK_ID]: "message cant be empty" },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
       }
 
       let privateMetadata = {};
@@ -368,19 +357,15 @@ export default {
         privateMetadata = {};
       }
 
-      const payload = {
-        channel: privateMetadata.channel,
-        text: modalText
-      };
-      if (privateMetadata.thread_ts) {
-        payload.thread_ts = privateMetadata.thread_ts;
-      }
+      const payload = { channel: privateMetadata.channel, text: modalText };
+      if (privateMetadata.thread_ts) payload.thread_ts = privateMetadata.thread_ts;
 
       const sent = await postSlackMessage(env, payload);
       console.log("Slack API response (warden type modal send):", sent);
+
       return new Response(JSON.stringify({ response_action: "clear" }), {
         status: 200,
-        headers: { "Content-Type": "application/json" }
+        headers: { "Content-Type": "application/json" },
       });
     }
 
@@ -391,13 +376,16 @@ export default {
           user: body.user_id,
           channel: body.channel_id,
           thread_ts: body.thread_ts,
-          text: `!warden ${(body.text || "").trim()}`
+          text: `!warden ${(body.text || "").trim()}`,
         }
       : null;
+
     const ack = () => new Response(isSlashCommand ? "" : "ok", { status: 200 });
 
     const event = body.event || slashCommandEvent;
-    const rulesCanvasUrl = env.RULES_CANVAS_URL || "https://hackclub.enterprise.slack.com/docs/T0266FRGM/F0AL6S8QWFR";
+    const rulesCanvasUrl =
+      env.RULES_CANVAS_URL || "https://hackclub.enterprise.slack.com/docs/T0266FRGM/F0AL6S8QWFR";
+
     const joinTestChannelId = "C0ALRPWUTC4";
     const joinAnnounceChannelId = env.JOIN_ANNOUNCE_CHANNEL_ID || "C0A7JH50JG4";
     const joinAnnounceChannel = env.JOIN_ANNOUNCE_CHANNEL || joinAnnounceChannelId;
@@ -409,23 +397,20 @@ export default {
           type: "section",
           text: {
             type: "mrkdwn",
-            text: `welcome to the basement <@${userId}>\n\n\n\n*you find yourself in a dimly lit basement...*\nyoure stuck here forever btw there is no leaving. _throws away keys_\n\nanyways everyone welcome our newest captive! :hii::ultrafastcatppuccinparrot::agadance::seb-when-dubstep:`
-          }
+            text: `welcome to the basement <@${userId}>\n\n\n\n*you find yourself in a dimly lit basement...*\nyoure stuck here forever btw there is no leaving. _throws away keys_\n\nanyways everyone welcome our newest captive! :hii::ultrafastcatppuccinparrot::agadance::seb-when-dubstep:`,
+          },
         },
         {
           type: "actions",
           elements: [
             {
               type: "button",
-              text: {
-                type: "plain_text",
-                text: ":hii:"
-              },
-              action_id: "hii_button"
-            }
-          ]
-        }
-      ]
+              text: { type: "plain_text", text: ":hii:" },
+              action_id: "hii_button",
+            },
+          ],
+        },
+      ],
     });
 
     const sendWelcomeAndRulesThread = async (channel, userId, logLabel) => {
@@ -433,14 +418,12 @@ export default {
       const res = await fetch("https://slack.com/api/chat.postMessage", {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${env.SLACK_BOT_TOKEN}`,
-          "Content-Type": "application/json"
+          Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
+          "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          channel,
-          ...welcomePayload
-        })
+        body: JSON.stringify({ channel, ...welcomePayload }),
       });
+
       const data = await res.json();
       console.log(`Slack API response (${logLabel}):`, data);
 
@@ -449,32 +432,29 @@ export default {
         const threadRes = await fetch("https://slack.com/api/chat.postMessage", {
           method: "POST",
           headers: {
-            "Authorization": `Bearer ${env.SLACK_BOT_TOKEN}`,
-            "Content-Type": "application/json"
+            Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
+            "Content-Type": "application/json",
           },
           body: JSON.stringify({
             channel: data.channel || channel,
             thread_ts: data.ts,
-            text: rulesText
-          })
+            text: rulesText,
+          }),
         });
+
         const threadData = await threadRes.json();
         console.log(`Slack API response (${logLabel} thread):`, threadData);
       }
     };
 
-    // ---------------------------
     // Handle users joining the public announce channel
-    // ---------------------------
     if (event && event.type === "member_joined_channel" && event.channel === joinAnnounceChannelId) {
       const user = event.user;
       console.log("User joined announce channel:", user, "channel:", event.channel);
       await sendWelcomeAndRulesThread(joinAnnounceChannel, user, "member_joined_channel");
     }
 
-    // ---------------------------
     // Handle keyword replies
-    // ---------------------------
     if (event && event.type === "message" && !event.bot_id && !event.subtype) {
       const text = event.text?.toLowerCase() || "";
       const channel = event.channel;
@@ -491,7 +471,7 @@ export default {
           const bareWarden = await postSlackMessage(env, {
             channel,
             thread_ts,
-            text: "bro what do you want im tryna sleep"
+            text: "bro what do you want im tryna sleep",
           });
           console.log("Slack API response (warden bare command):", bareWarden);
           return ack();
@@ -501,7 +481,7 @@ export default {
           const denied = await postSlackMessage(env, {
             channel,
             thread_ts,
-            text: "ay look...\n\nthis guy really tried to use warden commands :loll:"
+            text: "ay look...\n\nthis guy really tried to use warden commands :loll:",
           });
           console.log("Slack API response (warden unauthorized):", denied);
           return ack();
@@ -514,7 +494,7 @@ export default {
             const typeHelp = await postSlackMessage(env, {
               channel,
               thread_ts,
-              text: "usage: !warden type your message here :loll:"
+              text: "usage: !warden type your message here :loll:",
             });
             console.log("Slack API response (warden type help):", typeHelp);
             return ack();
@@ -523,7 +503,7 @@ export default {
           const typed = await postSlackMessage(env, {
             channel,
             thread_ts,
-            text: typeText
+            text: typeText,
           });
           console.log("Slack API response (warden type post):", typed);
 
@@ -531,13 +511,10 @@ export default {
             const deleteRes = await fetch("https://slack.com/api/chat.delete", {
               method: "POST",
               headers: {
-                "Authorization": `Bearer ${env.SLACK_BOT_TOKEN}`,
-                "Content-Type": "application/json"
+                Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
+                "Content-Type": "application/json",
               },
-              body: JSON.stringify({
-                channel,
-                ts: event.ts
-              })
+              body: JSON.stringify({ channel, ts: event.ts }),
             });
             const deleteData = await deleteRes.json();
             console.log("Slack API response (warden type delete command):", deleteData);
@@ -547,25 +524,19 @@ export default {
 
         const wardenRestText = trimmedText.replace(/^!warden\s*/i, "").trim();
         const isKnownSubcommand = /^(help|dr\s|dr-list$|dr-del-all$|dr-del\s)/i.test(wardenRestText);
+
         if (wardenRestText && !isKnownSubcommand) {
-          const typed = await postSlackMessage(env, {
-            channel,
-            thread_ts,
-            text: wardenRestText
-          });
+          const typed = await postSlackMessage(env, { channel, thread_ts, text: wardenRestText });
           console.log("Slack API response (warden inferred type post):", typed);
 
           if (event.ts) {
             const deleteRes = await fetch("https://slack.com/api/chat.delete", {
               method: "POST",
               headers: {
-                "Authorization": `Bearer ${env.SLACK_BOT_TOKEN}`,
-                "Content-Type": "application/json"
+                Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
+                "Content-Type": "application/json",
               },
-              body: JSON.stringify({
-                channel,
-                ts: event.ts
-              })
+              body: JSON.stringify({ channel, ts: event.ts }),
             });
             const deleteData = await deleteRes.json();
             console.log("Slack API response (warden inferred type delete command):", deleteData);
@@ -578,18 +549,14 @@ export default {
           const kvError = await postSlackMessage(env, {
             channel,
             thread_ts,
-            text: "i cant save reminders yet. bind a KV namespace as WARDEN_KV and redeploy bozo"
+            text: "i cant save reminders yet. bind a KV namespace as WARDEN_KV and redeploy bozo",
           });
           console.log("Slack API response (warden missing kv):", kvError);
           return ack();
         }
 
         if (normalizedText === "!warden help") {
-          const helpReply = await postSlackMessage(env, {
-            channel,
-            thread_ts,
-            text: COMMANDS_HELP_TEXT
-          });
+          const helpReply = await postSlackMessage(env, { channel, thread_ts, text: COMMANDS_HELP_TEXT });
           console.log("Slack API response (warden help):", helpReply);
           return ack();
         }
@@ -601,18 +568,25 @@ export default {
             const emptyList = await postSlackMessage(env, {
               channel,
               thread_ts,
-              text: "alr bro heres your reminder list:\n\n(no reminders yet)"
+              text: "alr bro heres your reminder list:\n\n(no reminders yet)",
             });
             console.log("Slack API response (warden list empty):", emptyList);
             return ack();
           }
 
-          const lines = reminders.map((r, i) => `${i + 1}. id: ${r.id}\n   reminder: \"${r.text}\"\n   schedule: ${r.timeRaw} (${r.time24}) ${r.timeZoneCode || DEFAULT_WARDEN_TIME_ZONE_CODE}\n   ping warden: ${r.pingWarden ? "yes" : "no"}`);
+          const lines = reminders.map(
+            (r, i) =>
+              `${i + 1}. id: ${r.id}\n   reminder: "${r.text}"\n   schedule: ${r.timeRaw} (${r.time24}) ${
+                r.timeZoneCode || DEFAULT_WARDEN_TIME_ZONE_CODE
+              }\n   ping warden: ${r.pingWarden ? "yes" : "no"}`
+          );
+
           const listResponse = await postSlackMessage(env, {
             channel,
             thread_ts,
-            text: `alr bro heres your reminder list:\n\n${lines.join("\n\n")}`
+            text: `alr bro heres your reminder list:\n\n${lines.join("\n\n")}`,
           });
+
           console.log("Slack API response (warden list):", listResponse);
           return ack();
         }
@@ -621,14 +595,15 @@ export default {
         if (deleteAllMatch) {
           const reminders = await loadDailyReminders(env);
           await saveDailyReminders(env, []);
-          const deleteAllText = reminders.length === 0
-            ? "damn what did all the reminders do?? :noooovanish:\n\n(deleted 0 reminders) :loll:"
-            : `damn what did all the reminders do?? :noooovanish:\n\n(deleted ${reminders.length} reminder${reminders.length === 1 ? "" : "s"})`;
-          const deletedAll = await postSlackMessage(env, {
-            channel,
-            thread_ts,
-            text: deleteAllText
-          });
+
+          const deleteAllText =
+            reminders.length === 0
+              ? "damn what did all the reminders do?? :noooovanish:\n\n(deleted 0 reminders) :loll:"
+              : `damn what did all the reminders do?? :noooovanish:\n\n(deleted ${reminders.length} reminder${
+                  reminders.length === 1 ? "" : "s"
+                })`;
+
+          const deletedAll = await postSlackMessage(env, { channel, thread_ts, text: deleteAllText });
           console.log("Slack API response (warden delete all):", deletedAll);
           return ack();
         }
@@ -640,11 +615,7 @@ export default {
           const nextReminders = reminders.filter((r) => r.id !== reminderId);
 
           if (nextReminders.length === reminders.length) {
-            const missing = await postSlackMessage(env, {
-              channel,
-              thread_ts,
-              text: `no reminder found with id ${reminderId} :loll:`
-            });
+            const missing = await postSlackMessage(env, { channel, thread_ts, text: `no reminder found with id ${reminderId} :loll:` });
             console.log("Slack API response (warden delete missing):", missing);
             return ack();
           }
@@ -653,7 +624,7 @@ export default {
           const deleted = await postSlackMessage(env, {
             channel,
             thread_ts,
-            text: `damn what did the reminder do? :noooovanish:\n\n(deleted reminder ${reminderId})`
+            text: `damn what did the reminder do? :noooovanish:\n\n(deleted reminder ${reminderId})`,
           });
           console.log("Slack API response (warden delete):", deleted);
           return ack();
@@ -665,17 +636,13 @@ export default {
             const tzError = await postSlackMessage(env, {
               channel,
               thread_ts,
-              text: `invalid timezone: ${parsedCommand.providedTimeZone}. use only aliases: AEDT, AEST, UTC, GMT.`
+              text: `invalid timezone: ${parsedCommand.providedTimeZone}. use only aliases: AEDT, AEST, UTC, GMT.`,
             });
             console.log("Slack API response (warden invalid timezone):", tzError);
             return ack();
           }
 
-          const help = await postSlackMessage(env, {
-            channel,
-            thread_ts,
-            text: "what the fuck is that command bro??? :loll:"
-          });
+          const help = await postSlackMessage(env, { channel, thread_ts, text: "what the fuck is that command bro??? :loll:" });
           console.log("Slack API response (warden invalid format):", help);
           return ack();
         }
@@ -691,104 +658,120 @@ export default {
           timeZoneCode: parsedCommand.timeZoneCode,
           timeZone: parsedCommand.timeZone,
           createdBy: event.user,
-          createdAt: new Date().toISOString()
+          createdAt: new Date().toISOString(),
         };
+
         reminders.push(reminder);
         await saveDailyReminders(env, reminders);
 
         const savedReply = await postSlackMessage(env, {
           channel,
           thread_ts,
-          text: `alr gng ive set a daily reminder for \"${reminder.text}\" at ${reminder.timeRaw} (${reminder.time24}) ${reminder.timeZoneCode}${reminder.pingWarden ? ", and youre getting pinged" : ""}`
+          text: `alr gng ive set a daily reminder for "${reminder.text}" at ${reminder.timeRaw} (${reminder.time24}) ${reminder.timeZoneCode}${
+            reminder.pingWarden ? ", and youre getting pinged" : ""
+          }`,
         });
+
         console.log("Slack API response (warden saved):", savedReply);
         return ack();
       }
 
-      // keyword example: "skrillex"
       // Reply if 'warden' is mentioned OR if bot has already replied in this thread
       let shouldReply = false;
       if (text.includes("warden")) {
         shouldReply = true;
-      } else if (thread_ts && await hasWardenReplied(env, channel, thread_ts)) {
+      } else if (thread_ts && (await hasWardenReplied(env, channel, thread_ts))) {
         shouldReply = true;
       }
 
       if (shouldReply) {
         console.log("Warden reply triggered (mention or thread participation)...");
-        const channel = event.channel;
-        const thread_ts = event.thread_ts || event.ts;
 
         // load history for this thread
         const history = await loadThreadMessages(env, channel, thread_ts);
 
-        // add the new user message WITH the user id so the model knows who spoke
+        // add new user msg (include user id)
         history.push({ role: "user", content: `<@${event.user}>: ${rawText}` });
 
-        // call grok with the full history
+        // call grok with history
         const aiReplyRaw = await getGrokReply(env, history);
 
-        // store assistant reply back into history
-        history.push({ role: "assistant", content: aiReplyRaw });
+        // trim to what you'll actually post
+        let aiReply = aiReplyRaw.split(/[\n\.\!\?]/)[0].trim();
+        if (!aiReply) aiReply = aiReplyRaw.trim();
+
+        // store EXACTLY what was posted (so memory matches reality)
+        history.push({ role: "assistant", content: aiReply });
 
         // persist
         await saveThreadMessages(env, channel, thread_ts, history);
-        let aiReply = aiReplyRaw.split(/[\n\.\!\?]/)[0].trim();
-        if (!aiReply) aiReply = aiReplyRaw.trim();
+
+        // post
         const res = await fetch("https://slack.com/api/chat.postMessage", {
           method: "POST",
           headers: {
-            "Authorization": `Bearer ${env.SLACK_BOT_TOKEN}`,
-            "Content-Type": "application/json"
+            Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
+            "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            channel: channel,
+            channel,
             text: aiReply,
-            thread_ts: thread_ts
-          })
+            thread_ts,
+          }),
         });
+
         const data = await res.json();
         console.log("Slack API response (warden AI):", data);
+
         await markWardenReplied(env, channel, thread_ts);
       }
-      
-        // test: respond with join message if 'join_test' is in the basement channel only
-        if (text.includes("join_test") && channel === joinTestChannelId) {
-          console.log("Keyword matched: join_test, sending simulated join reply...");
-          const simulatedUser = event.user || "test_user";
-          await sendWelcomeAndRulesThread(channel, simulatedUser, "join_test");
-        }
-      }
 
-    // ---------------------------
+      // test: respond with join message if 'join_test' is in the basement channel only
+      if (text.includes("join_test") && channel === joinTestChannelId) {
+        console.log("Keyword matched: join_test, sending simulated join reply...");
+        const simulatedUser = event.user || "test_user";
+        await sendWelcomeAndRulesThread(channel, simulatedUser, "join_test");
+      }
+    }
+
     // Handle Slack interaction payloads
-    // ---------------------------
-    console.log("Slack event type:", body.type, "actions:", body.actions ? body.actions.map(a => a.action_id) : "none");
+    console.log(
+      "Slack event type:",
+      body.type,
+      "actions:",
+      body.actions ? body.actions.map((a) => a.action_id) : "none"
+    );
+
     if (body.type === "block_actions") {
       console.log("block_actions event payload:", JSON.stringify(body));
       if (body.actions && body.actions[0].action_id === "hii_button") {
         const userId = body.user.id;
         const channel = body.channel.id;
         const messageTs = body.message.ts;
+
         console.log(`hii_button clicked by user ${userId} in channel ${channel}, messageTs: ${messageTs}`);
-        // Reply to the bot's message in thread
+
         const res = await fetch("https://slack.com/api/chat.postMessage", {
           method: "POST",
           headers: {
-            "Authorization": `Bearer ${env.SLACK_BOT_TOKEN}`,
-            "Content-Type": "application/json"
+            Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
+            "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            channel: channel,
+            channel,
             text: `:hii: from <@${userId}>`,
-            thread_ts: messageTs
-          })
+            thread_ts: messageTs,
+          }),
         });
+
         const data = await res.json();
         console.log("Slack API response (hii_button):", data);
         return ack();
       } else {
-        console.log("block_actions event received, but action_id is not hii_button:", body.actions ? body.actions.map(a => a.action_id) : "none");
+        console.log(
+          "block_actions event received, but action_id is not hii_button:",
+          body.actions ? body.actions.map((a) => a.action_id) : "none"
+        );
       }
     }
 
@@ -802,9 +785,7 @@ export default {
     }
 
     const reminders = await loadDailyReminders(env);
-    if (!reminders.length) {
-      return;
-    }
+    if (!reminders.length) return;
 
     const runDate = controller?.scheduledTime ? new Date(controller.scheduledTime) : new Date();
     const prevMinuteDate = new Date(runDate.getTime() - 60_000);
@@ -815,6 +796,7 @@ export default {
       const resolvedReminderTz = isValidTimeZone(reminder.timeZone)
         ? reminder.timeZone
         : (resolvedByCode?.timeZone || resolvedByStoredValue?.timeZone);
+
       const reminderTimeZone = resolvedReminderTz || DEFAULT_WARDEN_TIME_ZONE;
       if (!isValidTimeZone(reminderTimeZone)) {
         console.log("Skipping reminder with invalid timezone:", reminder.id, reminderTimeZone);
@@ -823,24 +805,19 @@ export default {
 
       const now = getNowInTimeZone(reminderTimeZone, runDate);
       const prevMinute = getNowInTimeZone(reminderTimeZone, prevMinuteDate);
+
       const matchesCurrentMinute = reminder.time24 === now.hm;
       const matchesPreviousMinute = reminder.time24 === prevMinute.hm;
-      if (!matchesCurrentMinute && !matchesPreviousMinute) {
-        continue;
-      }
+      if (!matchesCurrentMinute && !matchesPreviousMinute) continue;
 
       const fireYmd = matchesCurrentMinute ? now.ymd : prevMinute.ymd;
       const dedupeKey = `warden:daily_reminder_fired:${reminder.id}:${fireYmd}`;
       const alreadyFired = await env.WARDEN_KV.get(dedupeKey);
-      if (alreadyFired) {
-        continue;
-      }
+      if (alreadyFired) continue;
 
       const pingPrefix = reminder.pingWarden ? `<@${WARDEN_USER_ID}> ` : "";
-      const payload = {
-        channel: reminder.channel,
-        text: `${pingPrefix}${reminder.text}`
-      };
+      const payload = { channel: reminder.channel, text: `${pingPrefix}${reminder.text}` };
+
       const data = await postSlackMessage(env, payload);
       console.log("Slack API response (daily reminder):", data);
 
@@ -848,5 +825,5 @@ export default {
         await env.WARDEN_KV.put(dedupeKey, "1", { expirationTtl: 172800 });
       }
     }
-  }
+  },
 };
