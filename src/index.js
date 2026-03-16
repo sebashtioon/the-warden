@@ -1,12 +1,14 @@
 import SYSTEM_PROMPT from "../prompt/prompt.md";
 
 const THREAD_MEMORY_TTL_SECONDS = 60 * 60 * 24; // 1 day
-const THREAD_MEMORY_MAX_MESSAGES = 60; // store more since we're storing everything
+const THREAD_MEMORY_MAX_MESSAGES = 60;
 
 const WARDEN_USER_ID = "U094HHPS5B8";
+
 const REMINDER_KV_KEY = "warden:daily_reminders";
 const DEFAULT_WARDEN_TIME_ZONE = "Australia/Sydney";
 const DEFAULT_WARDEN_TIME_ZONE_CODE = "AEDT";
+
 const WARDEN_TYPE_SHORTCUT_CALLBACK_ID = "warden_type_shortcut";
 const WARDEN_TYPE_MODAL_CALLBACK_ID = "warden_type_modal";
 const WARDEN_TYPE_MODAL_BLOCK_ID = "warden_type_block";
@@ -37,18 +39,12 @@ const botNameKey = (botId) => `warden:bot_name:${botId}`;
 const resolveTimeZone = (timeZoneToken) => {
   const trimmed = (timeZoneToken || "").trim();
   if (!trimmed) {
-    return {
-      timeZoneCode: DEFAULT_WARDEN_TIME_ZONE_CODE,
-      timeZone: DEFAULT_WARDEN_TIME_ZONE,
-    };
+    return { timeZoneCode: DEFAULT_WARDEN_TIME_ZONE_CODE, timeZone: DEFAULT_WARDEN_TIME_ZONE };
   }
 
   const upper = trimmed.toUpperCase();
   if (TIME_ZONE_ALIASES[upper]) {
-    return {
-      timeZoneCode: upper,
-      timeZone: TIME_ZONE_ALIASES[upper],
-    };
+    return { timeZoneCode: upper, timeZone: TIME_ZONE_ALIASES[upper] };
   }
 
   return null;
@@ -76,9 +72,7 @@ const parseDailyReminderCommand = (rawText) => {
   const timeZoneRaw = match[4] || DEFAULT_WARDEN_TIME_ZONE_CODE;
 
   const resolvedTimeZone = resolveTimeZone(timeZoneRaw);
-  if (!resolvedTimeZone) {
-    return { ok: false, reason: "timezone_alias", providedTimeZone: timeZoneRaw };
-  }
+  if (!resolvedTimeZone) return { ok: false, reason: "timezone_alias", providedTimeZone: timeZoneRaw };
 
   const { timeZoneCode, timeZone } = resolvedTimeZone;
   const timeMatch = timeRaw.match(/^(\d{1,2}):(\d{2})(am|pm)$/);
@@ -100,15 +94,7 @@ const parseDailyReminderCommand = (rawText) => {
   const hh = String(hour).padStart(2, "0");
   const mm = String(minute).padStart(2, "0");
 
-  return {
-    ok: true,
-    reminderText,
-    pingWarden,
-    time24: `${hh}:${mm}`,
-    timeRaw,
-    timeZoneCode,
-    timeZone,
-  };
+  return { ok: true, reminderText, pingWarden, time24: `${hh}:${mm}`, timeRaw, timeZoneCode, timeZone };
 };
 
 const callSlackApi = async (env, method, payload) => {
@@ -176,7 +162,7 @@ async function getSlackUserDisplayName(env, userId) {
     const info = await callSlackApi(env, "users.info", { user: userId });
     const profile = info?.user?.profile;
     const name = profile?.display_name || profile?.real_name || info?.user?.name || userId;
-    await setCachedKV(env, userNameKey(userId), name, 60 * 60 * 24 * 7); // 7 days
+    await setCachedKV(env, userNameKey(userId), name, 60 * 60 * 24 * 7);
     return name;
   } catch (e) {
     console.log("users.info failed:", e);
@@ -189,11 +175,10 @@ async function getSlackBotDisplayName(env, botId) {
   const cached = await getCachedKV(env, botNameKey(botId));
   if (cached) return cached;
 
-  // Slack has bots.info; not all tokens/scopes may allow it. We'll try, else fallback.
   try {
     const info = await callSlackApi(env, "bots.info", { bot: botId });
     const name = info?.bot?.name || botId;
-    await setCachedKV(env, botNameKey(botId), name, 60 * 60 * 24 * 7); // 7 days
+    await setCachedKV(env, botNameKey(botId), name, 60 * 60 * 24 * 7);
     return name;
   } catch (e) {
     console.log("bots.info failed:", e);
@@ -273,10 +258,7 @@ const getNowInTimeZone = (timeZone, date = new Date()) => {
 
   const parts = formatter.formatToParts(date);
   const pick = (type) => parts.find((p) => p.type === type)?.value || "";
-  return {
-    ymd: `${pick("year")}-${pick("month")}-${pick("day")}`,
-    hm: `${pick("hour")}:${pick("minute")}`,
-  };
+  return { ymd: `${pick("year")}-${pick("month")}-${pick("day")}`, hm: `${pick("hour")}:${pick("minute")}` };
 };
 
 export default {
@@ -326,8 +308,6 @@ export default {
       return new Response("Invalid JSON", { status: 400 });
     }
 
-    console.log("Received Slack event:", JSON.stringify(body));
-
     const isSlashCommand = body.command === "/warden";
     const slashCommandEvent = isSlashCommand
       ? {
@@ -336,18 +316,17 @@ export default {
           channel: body.channel_id,
           thread_ts: body.thread_ts,
           text: `!warden ${(body.text || "").trim()}`,
-          ts: body.trigger_id || body.ts || undefined,
         }
       : null;
 
     const ack = () => new Response(isSlashCommand ? "" : "ok", { status: 200 });
 
-    // Slack URL verification
+    console.log("Received Slack event:", JSON.stringify(body));
+
     if (body.type === "url_verification") {
       return new Response(body.challenge, { status: 200 });
     }
 
-    // Message shortcut -> open Warden type modal
     if (body.type === "message_action" && body.callback_id === WARDEN_TYPE_SHORTCUT_CALLBACK_ID) {
       if (body.user?.id !== WARDEN_USER_ID) return new Response("", { status: 200 });
 
@@ -365,7 +344,6 @@ export default {
       return new Response("", { status: 200 });
     }
 
-    // Modal submit -> post as Warden in channel/thread
     if (body.type === "view_submission" && body.view?.callback_id === WARDEN_TYPE_MODAL_CALLBACK_ID) {
       if (body.user?.id !== WARDEN_USER_ID) {
         return new Response(
@@ -403,15 +381,12 @@ export default {
       const sent = await postSlackMessage(env, payload);
       console.log("Slack API response (warden type modal send):", sent);
 
-      // Also store this as warden speaking in the thread memory
+      // Store warden's own message (assistant role, raw text only)
       const channel = privateMetadata.channel;
       const thread_ts = privateMetadata.thread_ts;
       if (env.WARDEN_KV && channel && thread_ts) {
         const history = await loadThreadMessages(env, channel, thread_ts);
-        history.push({
-          role: "assistant",
-          content: `Warden (${WARDEN_USER_ID}): ${modalText}`,
-        });
+        history.push({ role: "assistant", content: modalText });
         await saveThreadMessages(env, channel, thread_ts, history);
       }
 
@@ -425,7 +400,6 @@ export default {
 
     const rulesCanvasUrl =
       env.RULES_CANVAS_URL || "https://hackclub.enterprise.slack.com/docs/T0266FRGM/F0AL6S8QWFR";
-
     const joinTestChannelId = "C0ALRPWUTC4";
     const joinAnnounceChannelId = env.JOIN_ANNOUNCE_CHANNEL_ID || "C0A7JH50JG4";
     const joinAnnounceChannel = env.JOIN_ANNOUNCE_CHANNEL || joinAnnounceChannelId;
@@ -487,10 +461,8 @@ export default {
       }
     };
 
-    // Handle users joining the public announce channel
     if (event && event.type === "member_joined_channel" && event.channel === joinAnnounceChannelId) {
       const user = event.user;
-      console.log("User joined announce channel:", user, "channel:", event.channel);
       await sendWelcomeAndRulesThread(joinAnnounceChannel, user, "member_joined_channel");
     }
 
@@ -504,64 +476,45 @@ export default {
       const trimmedText = rawText.trim();
       const normalizedText = trimmedText.toLowerCase();
 
-      // Ignore messages prefixed with "##" entirely (not stored, not replied to)
+      // Ignore "##" messages entirely (not stored, not replied to)
       if (normalizedText.startsWith("##")) {
         console.log("Ignoring ##-prefixed message");
         return ack();
       }
 
-      // Identify sender
-      const senderUserId = event.user || null; // often set for user messages; sometimes absent for bot messages
+      const senderUserId = event.user || null;
       const botId = event.bot_id || null;
       const isBotMessage = Boolean(botId);
 
-      // Store EVERY message in the thread memory with sender info
+      // Always store message into thread memory with sender info
       if (env.WARDEN_KV && channel && thread_ts) {
         const history = await loadThreadMessages(env, channel, thread_ts);
 
-        // Determine display name
-        let senderName = "unknown";
-        let senderTag = "unknown";
+        // Store sender as metadata prefix ONLY for non-warden lines.
+        // For warden's own messages, store raw text only so model doesn't mimic the log format.
+        const isWardenUserMessage = !isBotMessage && senderUserId === WARDEN_USER_ID;
 
-        if (isBotMessage) {
-          // include bot_id, and if Slack provides username on event, prefer it
-          senderName = event.username || (await getSlackBotDisplayName(env, botId));
-          senderTag = `bot:${botId}`;
+        if (isWardenUserMessage) {
+          history.push({ role: "assistant", content: trimmedText });
+        } else if (isBotMessage) {
+          const botName = event.username || (await getSlackBotDisplayName(env, botId));
+          history.push({ role: "user", content: `${botName} (bot:${botId}): ${trimmedText}` });
         } else {
-          senderName = senderUserId ? await getSlackUserDisplayName(env, senderUserId) : "unknown-user";
-          senderTag = senderUserId ? `user:${senderUserId}` : "user:unknown";
+          const userName = senderUserId ? await getSlackUserDisplayName(env, senderUserId) : "unknown-user";
+          history.push({ role: "user", content: `${userName} (user:${senderUserId || "unknown"}): ${trimmedText}` });
         }
-
-        // If it's specifically warden, label consistently
-        if (!isBotMessage && senderUserId === WARDEN_USER_ID) {
-          senderName = "Warden";
-          senderTag = `user:${WARDEN_USER_ID}`;
-        }
-
-        // Store as a user-style line, with metadata in the content.
-        // We keep role:"user" for non-warden senders, role:"assistant" for warden.
-        const role = (!isBotMessage && senderUserId === WARDEN_USER_ID) ? "assistant" : "user";
-
-        history.push({
-          role,
-          content: `${senderName} (${senderTag}): ${trimmedText}`,
-        });
 
         await saveThreadMessages(env, channel, thread_ts, history);
       }
 
-      // Prevent replying to any bot messages OR warden's own messages
-      // (we already stored them above)
+      // Never reply to bots or to warden itself
       if (isBotMessage || senderUserId === WARDEN_USER_ID) {
         return ack();
       }
 
-      // From here down: only human messages trigger logic
-      const textLower = normalizedText;
-
-      // Commands (human typed !warden is blocked unless they are warden, same as your existing behavior)
-      if (textLower.startsWith("!warden")) {
-        if (textLower === "!warden") {
+      // Commands (keeping minimal help here; you can re-add your full command handlers)
+      if (normalizedText.startsWith("!warden")) {
+        if (normalizedText === "!warden") {
           await postSlackMessage(env, { channel, thread_ts, text: "bro what do you want im tryna sleep" });
           return ack();
         }
@@ -575,9 +528,7 @@ export default {
           return ack();
         }
 
-        // Keep your existing reminder command code here if you want:
-        // For this “copy/paste” version, we’ll keep the behavior minimal and just show help.
-        if (textLower === "!warden help") {
+        if (normalizedText === "!warden help") {
           await postSlackMessage(env, { channel, thread_ts, text: COMMANDS_HELP_TEXT });
           return ack();
         }
@@ -585,9 +536,9 @@ export default {
         return ack();
       }
 
-      // Reply if 'warden' is mentioned OR if bot already replied in this thread
+      // Mention or thread participation
       let shouldReply = false;
-      if (textLower.includes("warden")) {
+      if (normalizedText.includes("warden")) {
         shouldReply = true;
       } else if (thread_ts && (await hasWardenReplied(env, channel, thread_ts))) {
         shouldReply = true;
@@ -599,11 +550,8 @@ export default {
         const aiReplyRaw = await getGrokReply(env, history);
         const aiReply = firstSentence(aiReplyRaw) || "bruh, even the AI doesn't know what to say.";
 
-        // Store EXACTLY what is posted as warden speaking
-        history.push({
-          role: "assistant",
-          content: `Warden (user:${WARDEN_USER_ID}): ${aiReply}`,
-        });
+        // Store assistant raw reply only
+        history.push({ role: "assistant", content: aiReply });
         await saveThreadMessages(env, channel, thread_ts, history);
 
         const data = await postSlackMessage(env, { channel, thread_ts, text: aiReply });
@@ -612,15 +560,13 @@ export default {
         await markWardenReplied(env, channel, thread_ts);
       }
 
-      // test: respond with join message if 'join_test' is in the basement channel only
-      if (textLower.includes("join_test") && channel === joinTestChannelId) {
-        console.log("Keyword matched: join_test, sending simulated join reply...");
+      if (normalizedText.includes("join_test") && channel === joinTestChannelId) {
         const simulatedUser = senderUserId || "test_user";
         await sendWelcomeAndRulesThread(channel, simulatedUser, "join_test");
       }
     }
 
-    // Handle Slack interaction payloads
+    // Button interactions
     if (body.type === "block_actions") {
       if (body.actions && body.actions[0].action_id === "hii_button") {
         const userId = body.user.id;
