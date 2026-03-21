@@ -339,6 +339,10 @@ const getNowInTimeZone = (timeZone, date = new Date()) => {
  * Calls the Hack Club AI proxy with a system prompt and message history.
  */
 const fetchGrokReply = async (env, messages) => {
+  if (!env.HACKCLUB_AI_API_KEY) {
+    console.log("Missing HACKCLUB_AI_API_KEY binding");
+    return "bruh, even the AI doesn't know what to say.";
+  }
   try {
     const res = await fetch("https://ai.hackclub.com/proxy/v1/chat/completions", {
       method: "POST",
@@ -424,29 +428,6 @@ const postWelcomeAndRulesThread = async (env, channel, userId, logLabel, rulesCa
 
 export default {
   async fetch(request, env) {
-    // --- Grok AI call using fetch ---
-    async function getGrokReply(env, messages) {
-      try {
-        const res = await fetch("https://ai.hackclub.com/proxy/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${env.HACKCLUB_AI_API_KEY}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            model: "moonshotai/kimi-k2-0905",
-            messages: [{ role: "system", content: SYSTEM_PROMPT }, ...(messages || [])],
-          }),
-        });
-
-        const data = await res.json();
-        return data?.choices?.[0]?.message?.content ?? "bruh, even the AI doesn't know what to say.";
-      } catch (err) {
-        console.log("Grok API error:", err);
-        return "bruh, even the AI doesn't know what to say.";
-      }
-    }
-
     let body;
     const contentType = request.headers.get("content-type") || "";
 
@@ -878,7 +859,7 @@ export default {
         history.push({ role: "user", content: `<@${event.user}>: ${rawText}` });
 
         // call grok with history
-        const aiReplyRaw = await getGrokReply(env, history);
+        const aiReplyRaw = await fetchGrokReply(env, history);
 
         // trim to what you'll actually post
         let aiReply = aiReplyRaw.split(/[\n\.\!\?]/)[0].trim();

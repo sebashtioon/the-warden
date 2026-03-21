@@ -1,0 +1,4 @@
+# Copy this file to .dev.vars for local development.
+# Never commit real secrets.
+HACKCLUB_AI_API_KEY=your_hackclub_ai_api_key_here
+SLACK_BOT_TOKEN=your_slack_bot_token_here
