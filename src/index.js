@@ -65,7 +65,11 @@ const saveThreadMessages = async (env, channel, thread_ts, messages) => {
 const messageMentionsWarden = (text, wardenUserId) => {
   if (!text) return false;
   const lower = text.toLowerCase();
-  return lower.includes("warden") || text.includes(`<@${wardenUserId}>`);
+  return (
+    lower.includes("warden") ||
+    text.includes(`<@${wardenUserId}>`) ||
+    lower.includes(WARDEN_PROFILE_URL.toLowerCase())
+  );
 };
 
 
@@ -106,6 +110,8 @@ const claimMessageEventReply = async (env, channel, eventTs) => {
 };
 
 const WARDEN_USER_ID = "U094HHPS5B8";
+const WARDEN_PROFILE_URL = "https://hackclub.enterprise.slack.com/team/U0ALL3K13EJ";
+const WARDEN_DEDICATED_CHANNEL_ID = "C0ANV0ZJDR6";
 const REMINDER_KV_KEY = "warden:daily_reminders";
 const DEFAULT_WARDEN_TIME_ZONE = "Australia/Sydney";
 const DEFAULT_WARDEN_TIME_ZONE_CODE = "AEDT";
@@ -577,6 +583,7 @@ export default {
     const joinTestChannelId = "C0ALRPWUTC4";
     const joinAnnounceChannelId = env.JOIN_ANNOUNCE_CHANNEL_ID || "C0A7JH50JG4";
     const joinAnnounceChannel = env.JOIN_ANNOUNCE_CHANNEL || joinAnnounceChannelId;
+    const allowedChannelIds = new Set([joinTestChannelId, joinAnnounceChannelId, WARDEN_DEDICATED_CHANNEL_ID]);
 
     const buildWelcomeMessage = (userId) => ({
       text: `welcome to the basement <@${userId}>`,
@@ -650,6 +657,10 @@ export default {
       const rawText = event.text || "";
       const trimmedText = rawText.trim();
       const normalizedText = trimmedText.toLowerCase();
+
+      if (!allowedChannelIds.has(channel)) {
+        return ack();
+      }
 
       // NEW: ignore messages prefixed with "##"
       if (normalizedText.startsWith("##")) {
