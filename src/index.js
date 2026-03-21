@@ -460,7 +460,7 @@ const postWelcomeAndRulesThread = async (env, channel, userId, logLabel, rulesCa
 };
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     let body;
     const contentType = request.headers.get("content-type") || "";
 
@@ -888,44 +888,55 @@ export default {
 
       if (shouldReply) {
         console.log("Warden reply triggered (mention or thread participation)...");
+        const runAiReply = async () => {
+          try {
+            // load history for this thread
+            const history = await loadThreadMessages(env, channel, thread_ts);
 
-        // load history for this thread
-        const history = await loadThreadMessages(env, channel, thread_ts);
+            // add new user msg (include user id)
+            history.push({ role: "user", content: `<@${event.user}>: ${rawText}` });
 
-        // add new user msg (include user id)
-        history.push({ role: "user", content: `<@${event.user}>: ${rawText}` });
+            // call grok with history
+            const aiReplyRaw = await fetchGrokReply(env, history);
 
-        // call grok with history
-        const aiReplyRaw = await fetchGrokReply(env, history);
+            // trim to what you'll actually post
+            let aiReply = aiReplyRaw.split(/[\n\.\!\?]/)[0].trim();
+            if (!aiReply) aiReply = aiReplyRaw.trim();
 
-        // trim to what you'll actually post
-        let aiReply = aiReplyRaw.split(/[\n\.\!\?]/)[0].trim();
-        if (!aiReply) aiReply = aiReplyRaw.trim();
+            // store EXACTLY what was posted (so memory matches reality)
+            history.push({ role: "assistant", content: aiReply });
 
-        // store EXACTLY what was posted (so memory matches reality)
-        history.push({ role: "assistant", content: aiReply });
+            // persist
+            await saveThreadMessages(env, channel, thread_ts, history);
 
-        // persist
-        await saveThreadMessages(env, channel, thread_ts, history);
+            // post
+            const res = await fetch("https://slack.com/api/chat.postMessage", {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                channel,
+                text: aiReply,
+                thread_ts,
+              }),
+            });
 
-        // post
-        const res = await fetch("https://slack.com/api/chat.postMessage", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            channel,
-            text: aiReply,
-            thread_ts,
-          }),
-        });
+            const data = await res.json();
+            console.log("Slack API response (warden AI):", data);
 
-        const data = await res.json();
-        console.log("Slack API response (warden AI):", data);
+            await markThreadWardenReplied(env, channel, thread_ts);
+          } catch (err) {
+            console.log("Async Warden reply failed:", err);
+          }
+        };
 
-        await markThreadWardenReplied(env, channel, thread_ts);
+        if (ctx?.waitUntil) {
+          ctx.waitUntil(runAiReply());
+        } else {
+          await runAiReply();
+        }
       }
 
       // test: respond with join message if 'join_test' is in the basement channel only
