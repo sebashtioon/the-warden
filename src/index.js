@@ -349,15 +349,22 @@ const getNowInTimeZone = (timeZone, date = new Date()) => {
  * Calls the Hack Club AI proxy with a system prompt and message history.
  */
 const fetchGrokReply = async (env, messages) => {
-  if (!env.HACKCLUB_AI_API_KEY) {
-    console.log("Missing HACKCLUB_AI_API_KEY binding");
+  const configuredKey = env.HACKCLUB_AI_API_KEY || env.OPENROUTER_API_KEY;
+  if (!configuredKey) {
+    console.log("Missing AI API key binding (HACKCLUB_AI_API_KEY or OPENROUTER_API_KEY)");
     return "bruh, even the AI doesn't know what to say.";
   }
+
+  const isOpenRouterKey = configuredKey.startsWith("sk-or-v1-");
+  const aiUrl = isOpenRouterKey
+    ? "https://openrouter.ai/api/v1/chat/completions"
+    : "https://ai.hackclub.com/proxy/v1/chat/completions";
+
   try {
-    const res = await fetch("https://ai.hackclub.com/proxy/v1/chat/completions", {
+    const res = await fetch(aiUrl, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${env.HACKCLUB_AI_API_KEY}`,
+        Authorization: `Bearer ${configuredKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
@@ -365,8 +372,24 @@ const fetchGrokReply = async (env, messages) => {
         messages: [{ role: "system", content: SYSTEM_PROMPT }, ...(messages || [])],
       }),
     });
+
     const data = await res.json();
-    return data?.choices?.[0]?.message?.content ?? "bruh, even the AI doesn't know what to say.";
+    if (!res.ok) {
+      console.log("AI API non-OK response:", {
+        status: res.status,
+        endpoint: aiUrl,
+        error: data?.error || data,
+      });
+      return "bruh, even the AI doesn't know what to say.";
+    }
+
+    const content = data?.choices?.[0]?.message?.content;
+    if (!content) {
+      console.log("AI API missing choices content:", { endpoint: aiUrl, response: data });
+      return "bruh, even the AI doesn't know what to say.";
+    }
+
+    return content;
   } catch (err) {
     console.log("Grok API error:", err);
     return "bruh, even the AI doesn't know what to say.";
