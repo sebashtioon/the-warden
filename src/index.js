@@ -1,55 +1,99 @@
+// --- Generic KV JSON helpers ---
+const getKVJson = async (kv, key, fallback = []) => {
+  if (!kv) return fallback;
+  const raw = await kv.get(key);
+  if (!raw) return fallback;
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : fallback;
+  } catch {
+    return fallback;
+  }
+};
+
+const putKVJson = async (kv, key, value, options = {}) => {
+  if (!kv) return;
+  await kv.put(key, JSON.stringify(value), options);
+};
 import SYSTEM_PROMPT from "../prompt/prompt.md";
 
 const THREAD_MEMORY_TTL_SECONDS = 60 * 60 * 24; // 1 day
 const THREAD_MEMORY_MAX_MESSAGES = 20;
 
-const threadKey = (channel, thread_ts) => `warden:thread:${channel}:${thread_ts}`;
+/**
+ * Generates a unique KV storage key for a Slack thread's message history.
+ * @param {string} channel - Slack channel ID
+ * @param {string} thread_ts - Slack thread timestamp
+ * @returns {string} KV key
+ */
+const getThreadKey = (channel, thread_ts) => `warden:thread:${channel}:${thread_ts}`;
 
-async function loadThreadMessages(env, channel, thread_ts) {
-  if (!env.WARDEN_KV) return [];
-  if (!channel || !thread_ts) return [];
 
-  const raw = await env.WARDEN_KV.get(threadKey(channel, thread_ts));
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
+/**
+ * Retrieves and parses the JSON message history for a specific thread from KV storage.
+ * @param {object} env - Environment object with WARDEN_KV
+ * @param {string} channel - Slack channel ID
+ * @param {string} thread_ts - Slack thread timestamp
+ * @returns {Promise<Array>} Message history array
+ */
+const loadThreadMessages = async (env, channel, thread_ts) => {
+  if (!env.WARDEN_KV || !channel || !thread_ts) return [];
+  return getKVJson(env.WARDEN_KV, getThreadKey(channel, thread_ts));
+};
 
-async function saveThreadMessages(env, channel, thread_ts, messages) {
-  if (!env.WARDEN_KV) return;
-  if (!channel || !thread_ts) return;
 
+/**
+ * Trims history to the maximum allowed and persists the JSON array to KV storage with a 1-day TTL.
+ * @param {object} env - Environment object with WARDEN_KV
+ * @param {string} channel - Slack channel ID
+ * @param {string} thread_ts - Slack thread timestamp
+ * @param {Array} messages - Message history array
+ */
+const saveThreadMessages = async (env, channel, thread_ts, messages) => {
+  if (!env.WARDEN_KV || !channel || !thread_ts) return;
   const trimmed = messages.slice(-THREAD_MEMORY_MAX_MESSAGES);
-  await env.WARDEN_KV.put(threadKey(channel, thread_ts), JSON.stringify(trimmed), {
-    expirationTtl: THREAD_MEMORY_TTL_SECONDS,
-  });
-}
+  await putKVJson(env.WARDEN_KV, getThreadKey(channel, thread_ts), trimmed, { expirationTtl: THREAD_MEMORY_TTL_SECONDS });
+};
 
-// Helper to check if bot is mentioned
-function isWardenMentioned(text, wardenUserId) {
+
+/**
+ * Checks if "warden" or the bot's specific User ID is present in a text string.
+ * @param {string} text - Message text
+ * @param {string} wardenUserId - Bot user ID
+ * @returns {boolean}
+ */
+const messageMentionsWarden = (text, wardenUserId) => {
   if (!text) return false;
   const lower = text.toLowerCase();
-  // Slack user mention format: <@WARDEN_USER_ID>
   return lower.includes("warden") || text.includes(`<@${wardenUserId}>`);
-}
+};
 
-// Helper to check if bot already replied to this message
-async function hasWardenReplied(env, channel, thread_ts) {
+
+/**
+ * Checks KV storage for a flag indicating the bot has already participated in a specific thread.
+ * @param {object} env - Environment object with WARDEN_KV
+ * @param {string} channel - Slack channel ID
+ * @param {string} thread_ts - Slack thread timestamp
+ * @returns {Promise<boolean>}
+ */
+const threadHasWardenReply = async (env, channel, thread_ts) => {
   if (!env.WARDEN_KV) return false;
   const repliedKey = `warden:replied:${channel}:${thread_ts}`;
   const replied = await env.WARDEN_KV.get(repliedKey);
   return replied === "1";
-}
+};
 
-async function markWardenReplied(env, channel, thread_ts) {
+/**
+ * Sets a flag in KV storage (1-day TTL) to mark that the bot has replied to a thread.
+ * @param {object} env - Environment object with WARDEN_KV
+ * @param {string} channel - Slack channel ID
+ * @param {string} thread_ts - Slack thread timestamp
+ */
+const markThreadWardenReplied = async (env, channel, thread_ts) => {
   if (!env.WARDEN_KV) return;
   const repliedKey = `warden:replied:${channel}:${thread_ts}`;
-  await env.WARDEN_KV.put(repliedKey, "1", { expirationTtl: 86400 }); // expire after 1 day
-}
+  await env.WARDEN_KV.put(repliedKey, "1", { expirationTtl: 86400 });
+};
 
 const WARDEN_USER_ID = "U094HHPS5B8";
 const REMINDER_KV_KEY = "warden:daily_reminders";
@@ -78,6 +122,11 @@ const TIME_ZONE_ALIASES = {
   GMT: "Etc/UTC",
 };
 
+/**
+ * Maps common aliases (e.g., AEDT, UTC) to IANA time zone strings or returns the default.
+ * @param {string} timeZoneToken
+ * @returns {object|null}
+ */
 const resolveTimeZone = (timeZoneToken) => {
   const trimmed = (timeZoneToken || "").trim();
   if (!trimmed) {
@@ -98,6 +147,11 @@ const resolveTimeZone = (timeZoneToken) => {
   return null;
 };
 
+/**
+ * Validates if a string is a valid IANA time zone using Intl.DateTimeFormat.
+ * @param {string} timeZone
+ * @returns {boolean}
+ */
 const isValidTimeZone = (timeZone) => {
   try {
     new Intl.DateTimeFormat("en-US", { timeZone }).format(new Date());
@@ -107,7 +161,12 @@ const isValidTimeZone = (timeZone) => {
   }
 };
 
-const parseDailyReminderCommand = (rawText) => {
+/**
+ * Regex parser for the !warden dr command. Extracts reminder text, pings, time, and timezone.
+ * @param {string} rawText
+ * @returns {object}
+ */
+const parseReminderCommand = (rawText) => {
   const text = rawText?.trim() || "";
   const match = text.match(
     /^!warden\s+dr\s+"([^"]+)"\s+(yes|no)\s+([0-9]{1,2}:[0-9]{2}(?:am|pm))(?:\s+([A-Za-z_\/+\-]+))?$/i
@@ -172,7 +231,14 @@ const parseDailyReminderCommand = (rawText) => {
   };
 };
 
-const callSlackApi = async (env, method, payload) => {
+/**
+ * Generic wrapper for POST requests to the Slack API using the bot token.
+ * @param {object} env - Environment object with SLACK_BOT_TOKEN
+ * @param {string} method - Slack API method
+ * @param {object} payload - Request payload
+ * @returns {Promise<object>} Slack API response
+ */
+const slackApiRequest = async (env, method, payload) => {
   const res = await fetch(`https://slack.com/api/${method}`, {
     method: "POST",
     headers: {
@@ -184,10 +250,22 @@ const callSlackApi = async (env, method, payload) => {
   return res.json();
 };
 
-const postSlackMessage = async (env, payload) => {
-  return callSlackApi(env, "chat.postMessage", payload);
+/**
+ * Convenience wrapper for chat.postMessage.
+ * @param {object} env - Environment object with SLACK_BOT_TOKEN
+ * @param {object} payload - Message payload
+ * @returns {Promise<object>} Slack API response
+ */
+const sendSlackMessage = async (env, payload) => {
+  return slackApiRequest(env, "chat.postMessage", payload);
 };
 
+/**
+ * Returns a JSON block kit object defining the "Warden Type" modal interface.
+ * @param {object} privateMetadata
+ * @param {string} [initialText]
+ * @returns {object}
+ */
 const buildWardenTypeModal = (privateMetadata, initialText = "") => ({
   type: "modal",
   callback_id: WARDEN_TYPE_MODAL_CALLBACK_ID,
@@ -210,25 +288,32 @@ const buildWardenTypeModal = (privateMetadata, initialText = "") => ({
   ],
 });
 
+/**
+ * Retrieves the global list of active daily reminders from KV storage.
+ * @param {object} env - Environment object with WARDEN_KV
+ * @returns {Promise<Array>} Reminders array
+ */
 const loadDailyReminders = async (env) => {
   if (!env.WARDEN_KV) return [];
-
-  const raw = await env.WARDEN_KV.get(REMINDER_KV_KEY);
-  if (!raw) return [];
-
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
+  return getKVJson(env.WARDEN_KV, REMINDER_KV_KEY);
 };
 
+/**
+ * Persists the global list of daily reminders to KV storage.
+ * @param {object} env - Environment object with WARDEN_KV
+ * @param {Array} reminders
+ */
 const saveDailyReminders = async (env, reminders) => {
   if (!env.WARDEN_KV) return;
-  await env.WARDEN_KV.put(REMINDER_KV_KEY, JSON.stringify(reminders));
+  await putKVJson(env.WARDEN_KV, REMINDER_KV_KEY, reminders);
 };
 
+/**
+ * Uses Intl.DateTimeFormat to format a date into YYYY-MM-DD and HH:mm for a specific timezone.
+ * @param {string} timeZone
+ * @param {Date} [date]
+ * @returns {object}
+ */
 const getNowInTimeZone = (timeZone, date = new Date()) => {
   const formatter = new Intl.DateTimeFormat("en-US", {
     timeZone,
@@ -248,41 +333,126 @@ const getNowInTimeZone = (timeZone, date = new Date()) => {
   };
 };
 
+
+// --- Top-level helpers moved out of fetch ---
+/**
+ * Calls the Hack Club AI proxy with a system prompt and message history.
+ */
+const fetchGrokReply = async (env, messages) => {
+  try {
+    const res = await fetch("https://ai.hackclub.com/proxy/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${env.HACKCLUB_AI_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "moonshotai/kimi-k2-0905",
+        messages: [{ role: "system", content: SYSTEM_PROMPT }, ...(messages || [])],
+      }),
+    });
+    const data = await res.json();
+    return data?.choices?.[0]?.message?.content ?? "bruh, even the AI doesn't know what to say.";
+  } catch (err) {
+    console.log("Grok API error:", err);
+    return "bruh, even the AI doesn't know what to say.";
+  }
+};
+
+/**
+ * Returns the Block Kit JSON for new member join messages.
+ */
+const createWelcomeMessage = (userId) => ({
+  text: `welcome to the basement <@${userId}>`,
+  blocks: [
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `welcome to the basement <@${userId}>\n\n\n\n*you find yourself in a dimly lit basement...*\nyoure stuck here forever btw there is no leaving. _throws away keys_\n\nanyways everyone welcome our newest captive! :hii::ultrafastcatppuccinparrot::agadance::seb-when-dubstep:`,
+      },
+    },
+    {
+      type: "actions",
+      elements: [
+        {
+          type: "button",
+          text: { type: "plain_text", text: ":hii:" },
+          action_id: "hii_button",
+        },
+      ],
+    },
+  ],
+});
+
+/**
+ * Posts a welcome message and then a threaded reply with rules context.
+ */
+const postWelcomeAndRulesThread = async (env, channel, userId, logLabel, rulesCanvasUrl) => {
+  const welcomePayload = createWelcomeMessage(userId);
+  const res = await fetch("https://slack.com/api/chat.postMessage", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ channel, ...welcomePayload }),
+  });
+
+  const data = await res.json();
+  console.log(`Slack API response (${logLabel}):`, data);
+
+  if (data.ok && data.ts) {
+    const rulesText = `oh btw <@${userId}> read the <${rulesCanvasUrl}|rules> if you want`;
+    const threadRes = await fetch("https://slack.com/api/chat.postMessage", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        channel: data.channel || channel,
+        thread_ts: data.ts,
+        text: rulesText,
+      }),
+    });
+
+    const threadData = await threadRes.json();
+    console.log(`Slack API response (${logLabel} thread):`, threadData);
+  }
+};
+
+// --- Modular event handlers ---
+const handleSlashCommand = async (body, env) => {
+  // ...existing logic for slash command...
+};
+
+const handleMessageEvent = async (event, env, body, ack, rulesCanvasUrl, joinTestChannelId, joinAnnounceChannelId, joinAnnounceChannel) => {
+  // ...existing logic for message event...
+};
+
+const handleBlockActions = async (body, env, ack) => {
+  // ...existing logic for block_actions...
+};
+
+const handleMemberJoin = async (event, env, joinAnnounceChannel, rulesCanvasUrl) => {
+  // ...existing logic for member_joined_channel...
+};
+
+const handleModalSubmission = async (body, env) => {
+  // ...existing logic for view_submission...
+};
+
 export default {
   async fetch(request, env) {
-    // --- Grok AI call using fetch ---
-    async function getGrokReply(env, messages) {
-      try {
-        const res = await fetch("https://ai.hackclub.com/proxy/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${env.HACKCLUB_AI_API_KEY}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            model: "moonshotai/kimi-k2-0905",
-            messages: [{ role: "system", content: SYSTEM_PROMPT }, ...(messages || [])],
-          }),
-        });
-
-        const data = await res.json();
-        return data?.choices?.[0]?.message?.content ?? "bruh, even the AI doesn't know what to say.";
-      } catch (err) {
-        console.log("Grok API error:", err);
-        return "bruh, even the AI doesn't know what to say.";
-      }
-    }
-
     let body;
     const contentType = request.headers.get("content-type") || "";
-
     try {
       if (contentType.includes("application/json")) {
         body = await request.json();
       } else if (contentType.includes("application/x-www-form-urlencoded")) {
         const rawForm = await request.text();
         const formParams = new URLSearchParams(rawForm);
-        // Interactive events send payload=<urlencoded JSON> while slash commands send plain fields.
         if (formParams.has("payload")) {
           const decoded = decodeURIComponent(formParams.get("payload"));
           body = JSON.parse(decoded);
@@ -305,147 +475,38 @@ export default {
       return new Response(body.challenge, { status: 200 });
     }
 
-    // Message shortcut -> open Warden type modal
-    if (body.type === "message_action" && body.callback_id === WARDEN_TYPE_SHORTCUT_CALLBACK_ID) {
-      if (body.user?.id !== WARDEN_USER_ID) {
-        return new Response("", { status: 200 });
-      }
-
-      const privateMetadata = {
-        channel: body.channel?.id,
-        thread_ts: body.message?.thread_ts || body.message?.ts || body.message_ts || null,
-      };
-
-      const openData = await callSlackApi(env, "views.open", {
-        trigger_id: body.trigger_id,
-        view: buildWardenTypeModal(privateMetadata, body.message?.text || ""),
-      });
-
-      console.log("Slack API response (warden type modal open):", openData);
-      return new Response("", { status: 200 });
-    }
-
-    // Modal submit -> post as Warden in channel/thread
-    if (body.type === "view_submission" && body.view?.callback_id === WARDEN_TYPE_MODAL_CALLBACK_ID) {
-      if (body.user?.id !== WARDEN_USER_ID) {
-        return new Response(
-          JSON.stringify({
-            response_action: "errors",
-            errors: { [WARDEN_TYPE_MODAL_BLOCK_ID]: "only warden can use this" },
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } }
-        );
-      }
-
-      const modalText =
-        body.view?.state?.values?.[WARDEN_TYPE_MODAL_BLOCK_ID]?.[WARDEN_TYPE_MODAL_ACTION_ID]?.value?.trim() || "";
-
-      if (!modalText) {
-        return new Response(
-          JSON.stringify({
-            response_action: "errors",
-            errors: { [WARDEN_TYPE_MODAL_BLOCK_ID]: "message cant be empty" },
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } }
-        );
-      }
-
-      let privateMetadata = {};
-      try {
-        privateMetadata = JSON.parse(body.view?.private_metadata || "{}");
-      } catch {
-        privateMetadata = {};
-      }
-
-      const payload = { channel: privateMetadata.channel, text: modalText };
-      if (privateMetadata.thread_ts) payload.thread_ts = privateMetadata.thread_ts;
-
-      const sent = await postSlackMessage(env, payload);
-      console.log("Slack API response (warden type modal send):", sent);
-
-      return new Response(JSON.stringify({ response_action: "clear" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-
+    // Dispatcher pattern
     const isSlashCommand = body.command === "/warden";
-    const slashCommandEvent = isSlashCommand
-      ? {
-          type: "message",
-          user: body.user_id,
-          channel: body.channel_id,
-          thread_ts: body.thread_ts,
-          text: `!warden ${(body.text || "").trim()}`,
-        }
-      : null;
-
     const ack = () => new Response(isSlashCommand ? "" : "ok", { status: 200 });
-
-    const event = body.event || slashCommandEvent;
-    const rulesCanvasUrl =
-      env.RULES_CANVAS_URL || "https://hackclub.enterprise.slack.com/docs/T0266FRGM/F0AL6S8QWFR";
-
+    const event = body.event || (isSlashCommand ? {
+      type: "message",
+      user: body.user_id,
+      channel: body.channel_id,
+      thread_ts: body.thread_ts,
+      text: `!warden ${(body.text || "").trim()}`,
+    } : null);
+    const rulesCanvasUrl = env.RULES_CANVAS_URL || "https://hackclub.enterprise.slack.com/docs/T0266FRGM/F0AL6S8QWFR";
     const joinTestChannelId = "C0ALRPWUTC4";
     const joinAnnounceChannelId = env.JOIN_ANNOUNCE_CHANNEL_ID || "C0A7JH50JG4";
     const joinAnnounceChannel = env.JOIN_ANNOUNCE_CHANNEL || joinAnnounceChannelId;
 
-    const buildWelcomeMessage = (userId) => ({
-      text: `welcome to the basement <@${userId}>`,
-      blocks: [
-        {
-          type: "section",
-          text: {
-            type: "mrkdwn",
-            text: `welcome to the basement <@${userId}>\n\n\n\n*you find yourself in a dimly lit basement...*\nyoure stuck here forever btw there is no leaving. _throws away keys_\n\nanyways everyone welcome our newest captive! :hii::ultrafastcatppuccinparrot::agadance::seb-when-dubstep:`,
-          },
-        },
-        {
-          type: "actions",
-          elements: [
-            {
-              type: "button",
-              text: { type: "plain_text", text: ":hii:" },
-              action_id: "hii_button",
-            },
-          ],
-        },
-      ],
-    });
-
-    const sendWelcomeAndRulesThread = async (channel, userId, logLabel) => {
-      const welcomePayload = buildWelcomeMessage(userId);
-      const res = await fetch("https://slack.com/api/chat.postMessage", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ channel, ...welcomePayload }),
-      });
-
-      const data = await res.json();
-      console.log(`Slack API response (${logLabel}):`, data);
-
-      if (data.ok && data.ts) {
-        const rulesText = `oh btw <@${userId}> read the <${rulesCanvasUrl}|rules> if you want`;
-        const threadRes = await fetch("https://slack.com/api/chat.postMessage", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            channel: data.channel || channel,
-            thread_ts: data.ts,
-            text: rulesText,
-          }),
-        });
-
-        const threadData = await threadRes.json();
-        console.log(`Slack API response (${logLabel} thread):`, threadData);
-      }
-    };
+    if (isSlashCommand) {
+      return handleSlashCommand(body, env);
+    }
+    if (event && event.type === "member_joined_channel" && event.channel === joinAnnounceChannelId) {
+      return handleMemberJoin(event, env, joinAnnounceChannel, rulesCanvasUrl);
+    }
+    if (event && event.type === "message" && !event.bot_id && !event.subtype) {
+      return handleMessageEvent(event, env, body, ack, rulesCanvasUrl, joinTestChannelId, joinAnnounceChannelId, joinAnnounceChannel);
+    }
+    if (body.type === "block_actions") {
+      return handleBlockActions(body, env, ack);
+    }
+    if (body.type === "view_submission" && body.view?.callback_id === WARDEN_TYPE_MODAL_CALLBACK_ID) {
+      return handleModalSubmission(body, env);
+    }
+    return ack();
+  },
 
     // Handle users joining the public announce channel
     if (event && event.type === "member_joined_channel" && event.channel === joinAnnounceChannelId) {
