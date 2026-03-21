@@ -95,6 +95,16 @@ const markThreadWardenReplied = async (env, channel, thread_ts) => {
   await env.WARDEN_KV.put(repliedKey, "1", { expirationTtl: 86400 });
 };
 
+const claimMessageEventReply = async (env, channel, eventTs) => {
+  if (!channel || !eventTs) return true;
+  if (!env.WARDEN_KV) return true;
+  const key = `warden:event_reply_claim:${channel}:${eventTs}`;
+  const seen = await env.WARDEN_KV.get(key);
+  if (seen === "1") return false;
+  await env.WARDEN_KV.put(key, "1", { expirationTtl: 3600 });
+  return true;
+};
+
 const WARDEN_USER_ID = "U094HHPS5B8";
 const REMINDER_KV_KEY = "warden:daily_reminders";
 const DEFAULT_WARDEN_TIME_ZONE = "Australia/Sydney";
@@ -841,12 +851,16 @@ export default {
         return ack();
       }
 
-      // Reply if 'warden' is mentioned OR if bot has already replied in this thread
-      let shouldReply = false;
-      if (text.includes("warden")) {
-        shouldReply = true;
-      } else if (thread_ts && (await threadHasWardenReply(env, channel, thread_ts))) {
-        shouldReply = true;
+      const mentionsWarden = messageMentionsWarden(rawText, WARDEN_USER_ID);
+
+      // Reply only when directly mentioned; don't auto-follow every thread message.
+      let shouldReply = mentionsWarden;
+      if (shouldReply && event.ts) {
+        const isFirstDelivery = await claimMessageEventReply(env, channel, event.ts);
+        if (!isFirstDelivery) {
+          console.log("Skipping duplicate Slack delivery for event:", channel, event.ts);
+          return ack();
+        }
       }
 
       if (shouldReply) {
