@@ -875,9 +875,11 @@ export default {
       }
 
       const mentionsWarden = messageMentionsWarden(rawText, WARDEN_USER_ID);
+      const isThreadFollowUp = Boolean(event.thread_ts) && event.thread_ts !== event.ts;
+      const hasWardenThreadContext = isThreadFollowUp && (await threadHasWardenReply(env, channel, thread_ts));
 
-      // Reply only when directly mentioned; don't auto-follow every thread message.
-      let shouldReply = mentionsWarden;
+      // Reply when directly mentioned, or continue within an active Warden thread.
+      let shouldReply = mentionsWarden || hasWardenThreadContext;
       if (shouldReply && event.ts) {
         const isFirstDelivery = await claimMessageEventReply(env, channel, event.ts);
         if (!isFirstDelivery) {
