@@ -2,3 +2,6 @@
 # Never commit real secrets.
 HACKCLUB_AI_API_KEY=your_hackclub_ai_api_key_here
 SLACK_BOT_TOKEN=your_slack_bot_token_here
+# Optional: comma-separated list of additional Slack channel IDs the bot should respond in.
+# The dedicated warden channel and announce channel are always included.
+# CHANNEL_WHITELIST=C0EXAMPLE1,C0EXAMPLE2
