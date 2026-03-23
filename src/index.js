@@ -109,6 +109,14 @@ const claimMessageEventReply = async (env, channel, eventTs) => {
   return true;
 };
 
+/**
+ * Parses a comma-separated string into a trimmed, non-empty array of values.
+ * @param {string|undefined} value - Raw env var value
+ * @returns {string[]}
+ */
+const parseCommaSeparatedList = (value) =>
+  value ? value.split(",").map((item) => item.trim()).filter(Boolean) : [];
+
 const WARDEN_USER_ID = "U094HHPS5B8";
 const WARDEN_PROFILE_URL = "https://hackclub.enterprise.slack.com/team/U0ALL3K13EJ";
 const WARDEN_DEDICATED_CHANNEL_ID = "C0ANV0ZJDR6";
@@ -583,7 +591,8 @@ export default {
     const joinTestChannelId = "C0ALRPWUTC4";
     const joinAnnounceChannelId = env.JOIN_ANNOUNCE_CHANNEL_ID || "C0A7JH50JG4";
     const joinAnnounceChannel = env.JOIN_ANNOUNCE_CHANNEL || joinAnnounceChannelId;
-    const allowedChannelIds = new Set([joinTestChannelId, joinAnnounceChannelId, WARDEN_DEDICATED_CHANNEL_ID]);
+    const extraChannelIds = parseCommaSeparatedList(env.CHANNEL_WHITELIST);
+    const allowedChannelIds = new Set([joinTestChannelId, joinAnnounceChannelId, WARDEN_DEDICATED_CHANNEL_ID, ...extraChannelIds]);
 
     const buildWelcomeMessage = (userId) => ({
       text: `welcome to the basement <@${userId}>`,
