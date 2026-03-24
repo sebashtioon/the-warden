@@ -390,6 +390,9 @@ const fetchGrokReply = async (env, messages) => {
       },
       body: JSON.stringify({
         model: "moonshotai/kimi-k2-0905",
+        provider: {
+          sort: 'throughput',
+        },
         messages: [{ role: "system", content: SYSTEM_PROMPT }, ...(messages || [])],
       }),
     });
