@@ -255,6 +255,9 @@ const parseReminderCommand = (rawText) => {
   };
 };
 
+// Backward-compatible alias used by existing command handlers.
+const parseDailyReminderCommand = parseReminderCommand;
+
 /**
  * Generic wrapper for POST requests to the Slack API using the bot token.
  * @param {object} env - Environment object with SLACK_BOT_TOKEN
@@ -283,6 +286,10 @@ const slackApiRequest = async (env, method, payload) => {
 const sendSlackMessage = async (env, payload) => {
   return slackApiRequest(env, "chat.postMessage", payload);
 };
+
+// Backward-compatible aliases used throughout existing handlers.
+const callSlackApi = slackApiRequest;
+const postSlackMessage = sendSlackMessage;
 
 /**
  * Returns a JSON block kit object defining the "Warden Type" modal interface.
