@@ -441,37 +441,58 @@ const fetchGrokReply = async (env, messages, options = {}) => {
  */
 const parseAssistantAction = (raw, options = {}) => {
   const { requireReply = false } = options;
-  const text = typeof raw === "string" ? raw.replace(/\r/g, "").trim() : "";
+  const text = typeof raw === "string" ? raw.split("\r").join("").trim() : "";
   if (!text) {
     return { reply: "", reaction: "" };
   }
 
   const lines = text.split("\n");
-  const replyLine = lines.find((line) => /^reply\s*:/i.test(line));
-  const reactionLine = lines.find((line) => /^reaction\s*:/i.test(line));
+  const getStructuredValue = (prefix) => {
+    const normalizedPrefix = prefix.toLowerCase();
+    for (const line of lines) {
+      const trimmedLine = line.trimStart();
+      const lowerLine = trimmedLine.toLowerCase();
+      if (!lowerLine.startsWith(normalizedPrefix)) continue;
+
+      const remainder = trimmedLine.slice(prefix.length).trimStart();
+      if (!remainder.startsWith(":")) continue;
+      return remainder.slice(1).trim();
+    }
+    return "";
+  };
 
   const normalizeReaction = (value) => {
-    const normalized = (value || "").trim().replace(/^:+|:+$/g, "");
-    if (!normalized || /^none$/i.test(normalized)) return "";
+    const trimmed = (value || "").trim();
+    let start = 0;
+    let end = trimmed.length;
+
+    while (start < end && trimmed[start] === ":") start += 1;
+    while (end > start && trimmed[end - 1] === ":") end -= 1;
+
+    const normalized = trimmed.slice(start, end);
+    if (!normalized || normalized.toLowerCase() === "none") return "";
     return normalized;
   };
 
-  if (!replyLine && !reactionLine) {
+  const reply = getStructuredValue("reply");
+  const reaction = normalizeReaction(getStructuredValue("reaction"));
+
+  if (!text.toLowerCase().includes("reply:") && !text.toLowerCase().includes("reaction:")) {
     return {
       reply: text,
       reaction: "",
     };
   }
 
-  const reply = (replyLine || "").replace(/^reply\s*:/i, "").trim();
-  const reaction = normalizeReaction((reactionLine || "").replace(/^reaction\s*:/i, ""));
-
   if (reply || !requireReply) {
     return { reply, reaction };
   }
 
   return {
-    reply: text.replace(/^reaction\s*:[^\n]*$/im, "").trim(),
+    reply: lines
+      .filter((line) => !line.trimStart().toLowerCase().startsWith("reaction:"))
+      .join("\n")
+      .trim(),
     reaction,
   };
 };
