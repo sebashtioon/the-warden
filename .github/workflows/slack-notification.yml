@@ -39,5 +39,9 @@ jobs:
               "text": "The Warden Notice: ${{ steps.check.outputs.type }}\nFile: ${{ steps.check.outputs.fname }}\nStatus: Verified"
             }
         env:
-          # THIS IS THE PART THAT WAS MISSING
+          # THE FIX: ALL ADMIN KEYS MAPPED HERE
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          HACKCLUB_AI_API_KEY: ${{ secrets.HACKCLUB_AI_API_KEY }}
+          HACKCLUB_AT_API_KEY: ${{ secrets.HACKCLUB_AT_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          CHANNEL_WHITELIST: ${{ secrets.CHANNEL_WHITELIST }}
