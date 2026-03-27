@@ -19,6 +19,7 @@ import SYSTEM_PROMPT from "../prompt/prompt.md";
 
 const THREAD_MEMORY_TTL_SECONDS = 60 * 60 * 24; // 1 day
 const THREAD_MEMORY_MAX_MESSAGES = 20;
+const AI_FAILURE_REPLY = "bruh, even the AI doesn't know what to say.";
 
 /**
  * Generates a unique KV storage key for a Slack thread's message history.
@@ -102,7 +103,7 @@ const markThreadWardenReplied = async (env, channel, thread_ts) => {
 const claimMessageEventReply = async (env, channel, eventTs) => {
   if (!channel || !eventTs) return true;
   if (!env.WARDEN_KV) return true;
-  const key = `warden:event_reply_claim:${channel}:${eventTs}`;
+  const key = `warden:event_action_claim:${channel}:${eventTs}`;
   const seen = await env.WARDEN_KV.get(key);
   if (seen === "1") return false;
   await env.WARDEN_KV.put(key, "1", { expirationTtl: 3600 });
@@ -287,6 +288,16 @@ const sendSlackMessage = async (env, payload) => {
   return slackApiRequest(env, "chat.postMessage", payload);
 };
 
+/**
+ * Convenience wrapper for reactions.add.
+ * @param {object} env - Environment object with SLACK_BOT_TOKEN
+ * @param {object} payload - Reaction payload
+ * @returns {Promise<object>} Slack API response
+ */
+const addSlackReaction = async (env, payload) => {
+  return slackApiRequest(env, "reactions.add", payload);
+};
+
 // Backward-compatible aliases used throughout existing handlers.
 const callSlackApi = slackApiRequest;
 const postSlackMessage = sendSlackMessage;
@@ -369,11 +380,12 @@ const getNowInTimeZone = (timeZone, date = new Date()) => {
 /**
  * Calls the Hack Club AI proxy with a system prompt and message history.
  */
-const fetchGrokReply = async (env, messages) => {
+const fetchGrokReply = async (env, messages, options = {}) => {
+  const { requireReply = false } = options;
   const configuredKey = env.HACKCLUB_AI_API_KEY || env.OPENROUTER_API_KEY;
   if (!configuredKey) {
     console.log("Missing AI API key binding (HACKCLUB_AI_API_KEY or OPENROUTER_API_KEY)");
-    return "bruh, even the AI doesn't know what to say.";
+    return requireReply ? `reply: ${AI_FAILURE_REPLY}\nreaction:` : "reply:\nreaction:";
   }
 
   const isOpenRouterKey = configuredKey.startsWith("sk-or-v1-");
@@ -392,7 +404,7 @@ const fetchGrokReply = async (env, messages) => {
         model: "moonshotai/kimi-k2-0905",
         messages: [{ role: "system", content: SYSTEM_PROMPT }, ...(messages || [])],
       }),
-    });
+      });
 
     const data = await res.json();
     if (!res.ok) {
@@ -401,20 +413,67 @@ const fetchGrokReply = async (env, messages) => {
         endpoint: aiUrl,
         error: data?.error || data,
       });
-      return "bruh, even the AI doesn't know what to say.";
+      return requireReply ? `reply: ${AI_FAILURE_REPLY}\nreaction:` : "reply:\nreaction:";
     }
 
     const content = data?.choices?.[0]?.message?.content;
     if (!content) {
       console.log("AI API missing choices content:", { endpoint: aiUrl, response: data });
-      return "bruh, even the AI doesn't know what to say.";
+      return requireReply ? `reply: ${AI_FAILURE_REPLY}\nreaction:` : "reply:\nreaction:";
     }
 
     return content;
   } catch (err) {
     console.log("Grok API error:", err);
-    return "bruh, even the AI doesn't know what to say.";
+    return requireReply ? `reply: ${AI_FAILURE_REPLY}\nreaction:` : "reply:\nreaction:";
   }
+};
+
+/**
+ * Parses the model's structured control response into a Slack reply and/or reaction.
+ * Expected format:
+ * reply: <text or blank>
+ * reaction: <custom_emoji_name or blank>
+ * @param {string} raw
+ * @param {object} [options]
+ * @param {boolean} [options.requireReply]
+ * @returns {{reply: string, reaction: string}}
+ */
+const parseAssistantAction = (raw, options = {}) => {
+  const { requireReply = false } = options;
+  const text = typeof raw === "string" ? raw.replace(/\r/g, "").trim() : "";
+  if (!text) {
+    return { reply: "", reaction: "" };
+  }
+
+  const lines = text.split("\n");
+  const replyLine = lines.find((line) => /^reply\s*:/i.test(line));
+  const reactionLine = lines.find((line) => /^reaction\s*:/i.test(line));
+
+  const normalizeReaction = (value) => {
+    const normalized = (value || "").trim().replace(/^:+|:+$/g, "");
+    if (!normalized || /^none$/i.test(normalized)) return "";
+    return normalized;
+  };
+
+  if (!replyLine && !reactionLine) {
+    return {
+      reply: text,
+      reaction: "",
+    };
+  }
+
+  const reply = (replyLine || "").replace(/^reply\s*:/i, "").trim();
+  const reaction = normalizeReaction((reactionLine || "").replace(/^reaction\s*:/i, ""));
+
+  if (reply || !requireReply) {
+    return { reply, reaction };
+  }
+
+  return {
+    reply: text.replace(/^reaction\s*:[^\n]*$/im, "").trim(),
+    reaction,
+  };
 };
 
 /**
@@ -904,10 +963,11 @@ export default {
       const mentionsWarden = messageMentionsWarden(rawText, WARDEN_USER_ID);
       const isThreadFollowUp = Boolean(event.thread_ts) && event.thread_ts !== event.ts;
       const hasWardenThreadContext = isThreadFollowUp && (await threadHasWardenReply(env, channel, thread_ts));
+      const mustReply = mentionsWarden || hasWardenThreadContext;
+      const allowsAutonomousEngagement = channel !== joinAnnounceChannelId && channel !== joinTestChannelId;
+      const shouldEvaluateWithAi = mustReply || allowsAutonomousEngagement;
 
-      // Reply when directly mentioned, or continue within an active Warden thread.
-      let shouldReply = mentionsWarden || hasWardenThreadContext;
-      if (shouldReply && event.ts) {
+      if (shouldEvaluateWithAi && event.ts) {
         const isFirstDelivery = await claimMessageEventReply(env, channel, event.ts);
         if (!isFirstDelivery) {
           console.log("Skipping duplicate Slack delivery for event:", channel, event.ts);
@@ -915,45 +975,42 @@ export default {
         }
       }
 
-      if (shouldReply) {
-        console.log("Warden reply triggered (mention or thread participation)...");
+      if (shouldEvaluateWithAi) {
+        console.log("Warden action triggered...");
         const runAiReply = async () => {
           try {
-            // load history for this thread
             const history = await loadThreadMessages(env, channel, thread_ts);
-
-            // add new user msg (include user id)
             history.push({ role: "user", content: `<@${event.user}>: ${rawText}` });
+            const aiReplyRaw = await fetchGrokReply(env, history, { requireReply: mustReply });
+            const { reply, reaction } = parseAssistantAction(aiReplyRaw, { requireReply: mustReply });
 
-            // call grok with history
-            const aiReplyRaw = await fetchGrokReply(env, history);
+            if (!reply && !reaction) {
+              console.log("Warden chose to ignore message");
+              return;
+            }
 
-            // trim to what you'll actually post
-            let aiReply = aiReplyRaw.split(/[\n\.\!\?]/)[0].trim();
-            if (!aiReply) aiReply = aiReplyRaw.trim();
+            if (reaction && event.ts) {
+              const reactionData = await addSlackReaction(env, {
+                channel,
+                timestamp: event.ts,
+                name: reaction,
+              });
+              console.log("Slack API response (warden reaction):", reactionData);
+            }
 
-            // store EXACTLY what was posted (so memory matches reality)
-            history.push({ role: "assistant", content: aiReply });
+            if (!reply) {
+              return;
+            }
 
-            // persist
+            history.push({ role: "assistant", content: reply });
             await saveThreadMessages(env, channel, thread_ts, history);
 
-            // post
-            const res = await fetch("https://slack.com/api/chat.postMessage", {
-              method: "POST",
-              headers: {
-                Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                channel,
-                text: aiReply,
-                thread_ts,
-              }),
+            const messageData = await postSlackMessage(env, {
+              channel,
+              text: reply,
+              thread_ts,
             });
-
-            const data = await res.json();
-            console.log("Slack API response (warden AI):", data);
+            console.log("Slack API response (warden AI):", messageData);
 
             await markThreadWardenReplied(env, channel, thread_ts);
           } catch (err) {
@@ -1069,3 +1126,5 @@ export default {
     }
   },
 };
+
+export { parseAssistantAction };
