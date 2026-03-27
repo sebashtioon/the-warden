@@ -33,12 +33,11 @@ jobs:
       - name: Send Slack Notification
         uses: slackapi/slack-github-action@v1.26.0
         with:
-          # Use ONLY valid inputs from the warning list
-          channel-id: 'C0ANV0ZJDR6' 
+          channel-id: 'C0ANV0ZJDR6'
           payload: |
             {
               "text": "The Warden Notice: ${{ steps.check.outputs.type }}\nFile: ${{ steps.check.outputs.fname }}\nStatus: Verified"
             }
         env:
-          # The Action looks for this EXACT name in the environment
+          # THIS IS THE PART THAT WAS MISSING
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
