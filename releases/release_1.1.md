@@ -1,7 +1,8 @@
-## Release 1.1 - 2026-03-27
+# Release 1.1
 
-### Changes since Version 1.0 (Sep 8, 2025):
+### Changes since Version 1.0 (2025-09-08):
 
+* 1.1 (f9a7e3d)
 * Create ossar.yml (0bd3871)
 * Delete .github/workflows/jscrambler-code-integrity.yml (58bb9ce)
 * Create jscrambler-code-integrity.yml (714736a)
