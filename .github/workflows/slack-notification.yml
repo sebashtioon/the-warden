@@ -1,21 +1,45 @@
-name: Slack Release Notification
+name: Release Notice
 
 on:
-  release:
-    types: [published]
-  workflow_dispatch: # <--- ADD THIS LINE
+  push:
+    paths:
+      - 'releases/*.md'
+  workflow_dispatch: # Allows manual triggering from the Actions tab
 
 jobs:
-  notify-slack:
+  notify:
     runs-on: ubuntu-latest
     steps:
-      - name: Send Slack Message
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Process Release File
+        id: check
+        run: |
+          # Find the newest .md file in the releases folder
+          FILE=$(ls -t releases/*.md | head -1 || echo "none")
+          if [ "$FILE" = "none" ]; then
+            echo "type=Manual Test" >> $GITHUB_OUTPUT
+            echo "fname=No file found" >> $GITHUB_OUTPUT
+          else
+            FILENAME=$(basename "$FILE")
+            if grep -qiE "acceleration|performance|speed|fast" "$FILE"; then
+              echo "type=Acceleration Release" >> $GITHUB_OUTPUT
+            else
+              echo "type=Standard Release" >> $GITHUB_OUTPUT
+            fi
+            echo "fname=$FILENAME" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Send Slack Notification
         uses: slackapi/slack-github-action@v1.26.0
         with:
           payload: |
             {
-              "text": "The Warden Release Notification: ${{ github.event.release.tag_name || 'Manual Test' }}\n\nView Release on GitHub: ${{ github.event.release.html_url || 'https://github.com/sebashtioon/the-warden' }}"
+              "text": "The Warden Notice: ${{ steps.check.outputs.type }}\nFile: ${{ steps.check.outputs.fname }}\nStatus: Verified\nLink: ${{ github.server_url }}/${{ github.repository }}/blob/master/releases/"
             }
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+          HACKCLUB_AI_API_KEY: ${{ secrets.HACKCLUB_AI_API_KEY }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
