@@ -1015,6 +1015,12 @@ export default {
                 name: reaction,
               });
               console.log("Slack API response (warden reaction):", reactionData);
+
+              if (reactionData?.ok) {
+                history.push({ role: "assistant", content: `[reaction:${reaction}]` });
+                await saveThreadMessages(env, channel, thread_ts, history);
+                await markThreadWardenReplied(env, channel, thread_ts);
+              }
             }
 
             if (!reply) {
