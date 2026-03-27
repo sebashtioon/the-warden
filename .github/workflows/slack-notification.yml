@@ -4,7 +4,7 @@ on:
   push:
     paths:
       - 'releases/*.md'
-  workflow_dispatch: # Manual trigger button in Actions tab
+  workflow_dispatch: # Manual trigger button
 
 jobs:
   notify:
@@ -23,7 +23,7 @@ jobs:
             echo "fname=No file found" >> $GITHUB_OUTPUT
           else
             FILENAME=$(basename "$FILE")
-            # Scan for acceleration keywords
+            # Scan for acceleration keywords exactly like your JS grep logic
             if grep -qiE "acceleration|performance|speed|fast" "$FILE"; then
               echo "type=Acceleration Release" >> $GITHUB_OUTPUT
             else
@@ -35,13 +35,13 @@ jobs:
       - name: Send Slack Notification
         uses: slackapi/slack-github-action@v1.26.0
         with:
+          # Using the Bot Token method from your JS
+          slack-token: ${{ secrets.SLACK_BOT_TOKEN }}
+          channel-id: 'C0ANV0ZJDR6' # Your WARDEN_DEDICATED_CHANNEL_ID from JS
           payload: |
             {
-              "text": "The Warden Notice: ${{ steps.check.outputs.type }}\nFile: ${{ steps.check.outputs.fname }}\nStatus: Verified\nLink: ${{ github.server_url }}/${{ github.repository }}/blob/master/releases/"
+              "text": "The Warden Notice: ${{ steps.check.outputs.type }}\nFile: ${{ steps.check.outputs.fname }}\nStatus: Verified\nLink: ${{ github.server_url }}/${{ github.repository }}/blob/master/releases/${{ steps.check.outputs.fname }}"
             }
         env:
-          # THESE MUST BE IN GITHUB SETTINGS > SECRETS
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
-          HACKCLUB_AI_API_KEY: ${{ secrets.HACKCLUB_AI_API_KEY }}
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          HACKCLUB_AI_API_KEY: ${{ secrets.HACKCLUB_AI_API_KEY }}
