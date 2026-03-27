@@ -19,15 +19,6 @@ import SYSTEM_PROMPT from "../prompt/prompt.md";
 
 const THREAD_MEMORY_TTL_SECONDS = 60 * 60 * 24; // 1 day
 const THREAD_MEMORY_MAX_MESSAGES = 20;
-const AI_FAILURE_REPLY = "bruh, even the AI doesn't know what to say.";
-const ALLOWED_REACTION_NAMES = new Set([
-  "ultrafastcatppuccinparrot",
-  "loll",
-  "skulk",
-  "noooovanish",
-  "thumbup",
-  "canberraisbetterthansydney",
-]);
 
 /**
  * Generates a unique KV storage key for a Slack thread's message history.
@@ -111,7 +102,7 @@ const markThreadWardenReplied = async (env, channel, thread_ts) => {
 const claimMessageEventReply = async (env, channel, eventTs) => {
   if (!channel || !eventTs) return true;
   if (!env.WARDEN_KV) return true;
-  const key = `warden:event_action_claim:${channel}:${eventTs}`;
+  const key = `warden:event_reply_claim:${channel}:${eventTs}`;
   const seen = await env.WARDEN_KV.get(key);
   if (seen === "1") return false;
   await env.WARDEN_KV.put(key, "1", { expirationTtl: 3600 });
@@ -296,16 +287,6 @@ const sendSlackMessage = async (env, payload) => {
   return slackApiRequest(env, "chat.postMessage", payload);
 };
 
-/**
- * Convenience wrapper for reactions.add.
- * @param {object} env - Environment object with SLACK_BOT_TOKEN
- * @param {object} payload - Reaction payload
- * @returns {Promise<object>} Slack API response
- */
-const addSlackReaction = async (env, payload) => {
-  return slackApiRequest(env, "reactions.add", payload);
-};
-
 // Backward-compatible aliases used throughout existing handlers.
 const callSlackApi = slackApiRequest;
 const postSlackMessage = sendSlackMessage;
@@ -388,12 +369,11 @@ const getNowInTimeZone = (timeZone, date = new Date()) => {
 /**
  * Calls the Hack Club AI proxy with a system prompt and message history.
  */
-const fetchGrokReply = async (env, messages, options = {}) => {
-  const { requireReply = false } = options;
+const fetchGrokReply = async (env, messages) => {
   const configuredKey = env.HACKCLUB_AI_API_KEY || env.OPENROUTER_API_KEY;
   if (!configuredKey) {
     console.log("Missing AI API key binding (HACKCLUB_AI_API_KEY or OPENROUTER_API_KEY)");
-    return requireReply ? `reply: ${AI_FAILURE_REPLY}\nreaction:` : "reply:\nreaction:";
+    return "bruh, even the AI doesn't know what to say.";
   }
 
   const isOpenRouterKey = configuredKey.startsWith("sk-or-v1-");
@@ -412,7 +392,7 @@ const fetchGrokReply = async (env, messages, options = {}) => {
         model: "moonshotai/kimi-k2-0905",
         messages: [{ role: "system", content: SYSTEM_PROMPT }, ...(messages || [])],
       }),
-      });
+    });
 
     const data = await res.json();
     if (!res.ok) {
@@ -421,94 +401,20 @@ const fetchGrokReply = async (env, messages, options = {}) => {
         endpoint: aiUrl,
         error: data?.error || data,
       });
-      return requireReply ? `reply: ${AI_FAILURE_REPLY}\nreaction:` : "reply:\nreaction:";
+      return "bruh, even the AI doesn't know what to say.";
     }
 
     const content = data?.choices?.[0]?.message?.content;
     if (!content) {
       console.log("AI API missing choices content:", { endpoint: aiUrl, response: data });
-      return requireReply ? `reply: ${AI_FAILURE_REPLY}\nreaction:` : "reply:\nreaction:";
+      return "bruh, even the AI doesn't know what to say.";
     }
 
     return content;
   } catch (err) {
     console.log("Grok API error:", err);
-    return requireReply ? `reply: ${AI_FAILURE_REPLY}\nreaction:` : "reply:\nreaction:";
+    return "bruh, even the AI doesn't know what to say.";
   }
-};
-
-/**
- * Parses the model's structured control response into a Slack reply and/or reaction.
- * Expected format:
- * reply: <text or blank>
- * reaction: <custom_emoji_name or blank>
- * @param {string} raw
- * @param {object} [options]
- * @param {boolean} [options.requireReply]
- * @returns {{reply: string, reaction: string}}
- */
-const parseAssistantAction = (raw, options = {}) => {
-  const { requireReply = false } = options;
-  const text = typeof raw === "string" ? raw.split("\r").join("").trim() : "";
-  if (!text) {
-    return { reply: requireReply ? AI_FAILURE_REPLY : "", reaction: "" };
-  }
-
-  const lines = text.split("\n");
-  const getStructuredValue = (prefix) => {
-    const normalizedPrefix = prefix.toLowerCase();
-    for (const line of lines) {
-      const trimmedLine = line.trimStart();
-      const lowerLine = trimmedLine.toLowerCase();
-      if (!lowerLine.startsWith(normalizedPrefix)) continue;
-
-      const remainder = trimmedLine.slice(prefix.length).trimStart();
-      if (!remainder.startsWith(":")) continue;
-      return remainder.slice(1).trim();
-    }
-    return "";
-  };
-
-  const normalizeReaction = (value) => {
-    const trimmed = (value || "").trim();
-    let start = 0;
-    let end = trimmed.length;
-
-    while (start < end && trimmed[start] === ":") start += 1;
-    while (end > start && trimmed[end - 1] === ":") end -= 1;
-
-    const normalized = trimmed.slice(start, end);
-    if (!normalized || normalized.toLowerCase() === "none") return "";
-    if (!ALLOWED_REACTION_NAMES.has(normalized)) return "";
-    return normalized;
-  };
-
-  const reply = getStructuredValue("reply");
-  const reaction = normalizeReaction(getStructuredValue("reaction"));
-
-  if (!text.toLowerCase().includes("reply:") && !text.toLowerCase().includes("reaction:")) {
-    return {
-      reply: text,
-      reaction: "",
-    };
-  }
-
-  if (reply || !requireReply) {
-    return { reply, reaction };
-  }
-
-  const fallbackReply = lines
-    .filter((line) => {
-      const lower = line.trimStart().toLowerCase();
-      return !lower.startsWith("reaction:") && !lower.startsWith("reply:");
-    })
-    .join("\n")
-    .trim();
-
-  return {
-    reply: fallbackReply || AI_FAILURE_REPLY,
-    reaction,
-  };
 };
 
 /**
@@ -998,9 +904,10 @@ export default {
       const mentionsWarden = messageMentionsWarden(rawText, WARDEN_USER_ID);
       const isThreadFollowUp = Boolean(event.thread_ts) && event.thread_ts !== event.ts;
       const hasWardenThreadContext = isThreadFollowUp && (await threadHasWardenReply(env, channel, thread_ts));
-      const shouldEvaluateWithAi = mentionsWarden || hasWardenThreadContext;
 
-      if (shouldEvaluateWithAi && event.ts) {
+      // Reply when directly mentioned, or continue within an active Warden thread.
+      let shouldReply = mentionsWarden || hasWardenThreadContext;
+      if (shouldReply && event.ts) {
         const isFirstDelivery = await claimMessageEventReply(env, channel, event.ts);
         if (!isFirstDelivery) {
           console.log("Skipping duplicate Slack delivery for event:", channel, event.ts);
@@ -1008,48 +915,45 @@ export default {
         }
       }
 
-      if (shouldEvaluateWithAi) {
-        console.log("Warden action triggered...");
+      if (shouldReply) {
+        console.log("Warden reply triggered (mention or thread participation)...");
         const runAiReply = async () => {
           try {
+            // load history for this thread
             const history = await loadThreadMessages(env, channel, thread_ts);
+
+            // add new user msg (include user id)
             history.push({ role: "user", content: `<@${event.user}>: ${rawText}` });
-            const aiReplyRaw = await fetchGrokReply(env, history, { requireReply: false });
-            const { reply, reaction } = parseAssistantAction(aiReplyRaw, { requireReply: false });
 
-            if (!reply && !reaction) {
-              console.log("Warden chose to ignore message");
-              return;
-            }
+            // call grok with history
+            const aiReplyRaw = await fetchGrokReply(env, history);
 
-            if (reaction && event.ts) {
-              const reactionData = await addSlackReaction(env, {
-                channel,
-                timestamp: event.ts,
-                name: reaction,
-              });
-              console.log("Slack API response (warden reaction):", reactionData);
+            // trim to what you'll actually post
+            let aiReply = aiReplyRaw.split(/[\n\.\!\?]/)[0].trim();
+            if (!aiReply) aiReply = aiReplyRaw.trim();
 
-              if (reactionData?.ok) {
-                history.push({ role: "assistant", content: `[reaction:${reaction}]` });
-                await saveThreadMessages(env, channel, thread_ts, history);
-                await markThreadWardenReplied(env, channel, thread_ts);
-              }
-            }
+            // store EXACTLY what was posted (so memory matches reality)
+            history.push({ role: "assistant", content: aiReply });
 
-            if (!reply) {
-              return;
-            }
-
-            history.push({ role: "assistant", content: reply });
+            // persist
             await saveThreadMessages(env, channel, thread_ts, history);
 
-            const messageData = await postSlackMessage(env, {
-              channel,
-              text: reply,
-              thread_ts,
+            // post
+            const res = await fetch("https://slack.com/api/chat.postMessage", {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                channel,
+                text: aiReply,
+                thread_ts,
+              }),
             });
-            console.log("Slack API response (warden AI):", messageData);
+
+            const data = await res.json();
+            console.log("Slack API response (warden AI):", data);
 
             await markThreadWardenReplied(env, channel, thread_ts);
           } catch (err) {
@@ -1165,5 +1069,3 @@ export default {
     }
   },
 };
-
-export { parseAssistantAction };
