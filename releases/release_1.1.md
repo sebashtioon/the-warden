@@ -1,7 +1,30 @@
-## Release 1.0 - 2026-03-24
+## Release 1.1 - 2026-03-27
 
-### Changes from the last 3 weeks:
+### Changes since Version 1.0 (Sep 8, 2025):
 
+* Create ossar.yml (0bd3871)
+* Delete .github/workflows/jscrambler-code-integrity.yml (58bb9ce)
+* Create jscrambler-code-integrity.yml (714736a)
+* fix(codex): harden ai action parsing and reaction validation (7e6495f)
+* fix(codex): persist reaction-only thread participation (f5be720)
+* feat(codex): dont require replies to consume less tokens (ed41e23)
+* fix(codex): Replaced the regex-based parser in src/index.js:442 with plain string operations. (37fbc4a)
+* feat: add slack reactions (b60a7f5)
+* Update prompt.md (31322ef)
+* Update prompt.md (432f5d7)
+* Create config.yml (fd19b0a)
+* Create bug_report.yml (689622d)
+* Create feature_request.yml (4c446ae)
+* Update prompt.md (fff5cf3)
+* Rename Coc(k).md to coc(k).md (e9d3db6)
+* Create Coc(k).md (71cd65e)
+* dont need anymore (fb210ae)
+* Update prompt.md (facd462)
+* Create coc(k).md (276a5ea)
+* thank yall (33b2516)
+* Update README.md (7f036b2)
+* add hypercommit badge and MIT license (e2d8e6b)
+* RELEASE_NOTES (8d86ad4)
 * Create SECURITY.md (8fc5e9c)
 * Update prompt.md (81a73bc)
 * Update prompt.md (3bdae4b)
