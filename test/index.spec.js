@@ -147,6 +147,20 @@ describe('The Warden worker', () => {
 				reaction: 'skulk',
 			});
 		});
+
+		it('falls back to a real reply when requireReply is true and reply is blank', () => {
+			expect(parseAssistantAction('reply:\nreaction: loll', { requireReply: true })).toEqual({
+				reply: "bruh, even the AI doesn't know what to say.",
+				reaction: 'loll',
+			});
+		});
+
+		it('drops reactions outside the allowlist', () => {
+			expect(parseAssistantAction('reply: nah\nreaction: party_blob')).toEqual({
+				reply: 'nah',
+				reaction: '',
+			});
+		});
 	});
 
 	it('adds a Slack reaction for an AI-selected reaction-only message', async () => {

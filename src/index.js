@@ -20,6 +20,14 @@ import SYSTEM_PROMPT from "../prompt/prompt.md";
 const THREAD_MEMORY_TTL_SECONDS = 60 * 60 * 24; // 1 day
 const THREAD_MEMORY_MAX_MESSAGES = 20;
 const AI_FAILURE_REPLY = "bruh, even the AI doesn't know what to say.";
+const ALLOWED_REACTION_NAMES = new Set([
+  "ultrafastcatppuccinparrot",
+  "loll",
+  "skulk",
+  "noooovanish",
+  "thumbup",
+  "canberraisbetterthansydney",
+]);
 
 /**
  * Generates a unique KV storage key for a Slack thread's message history.
@@ -443,7 +451,7 @@ const parseAssistantAction = (raw, options = {}) => {
   const { requireReply = false } = options;
   const text = typeof raw === "string" ? raw.split("\r").join("").trim() : "";
   if (!text) {
-    return { reply: "", reaction: "" };
+    return { reply: requireReply ? AI_FAILURE_REPLY : "", reaction: "" };
   }
 
   const lines = text.split("\n");
@@ -471,6 +479,7 @@ const parseAssistantAction = (raw, options = {}) => {
 
     const normalized = trimmed.slice(start, end);
     if (!normalized || normalized.toLowerCase() === "none") return "";
+    if (!ALLOWED_REACTION_NAMES.has(normalized)) return "";
     return normalized;
   };
 
@@ -488,11 +497,16 @@ const parseAssistantAction = (raw, options = {}) => {
     return { reply, reaction };
   }
 
+  const fallbackReply = lines
+    .filter((line) => {
+      const lower = line.trimStart().toLowerCase();
+      return !lower.startsWith("reaction:") && !lower.startsWith("reply:");
+    })
+    .join("\n")
+    .trim();
+
   return {
-    reply: lines
-      .filter((line) => !line.trimStart().toLowerCase().startsWith("reaction:"))
-      .join("\n")
-      .trim(),
+    reply: fallbackReply || AI_FAILURE_REPLY,
     reaction,
   };
 };
