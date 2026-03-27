@@ -4,7 +4,7 @@ on:
   push:
     paths:
       - 'releases/*.md'
-  workflow_dispatch: # Manual trigger button
+  workflow_dispatch: 
 
 jobs:
   notify:
@@ -16,14 +16,12 @@ jobs:
       - name: Process Release File
         id: check
         run: |
-          # Find newest file; default to 'Manual' if none exist
           FILE=$(ls -t releases/*.md | head -1 || echo "none")
           if [ "$FILE" = "none" ]; then
             echo "type=Manual Test" >> $GITHUB_OUTPUT
             echo "fname=No file found" >> $GITHUB_OUTPUT
           else
             FILENAME=$(basename "$FILE")
-            # Scan for acceleration keywords exactly like your JS grep logic
             if grep -qiE "acceleration|performance|speed|fast" "$FILE"; then
               echo "type=Acceleration Release" >> $GITHUB_OUTPUT
             else
@@ -35,13 +33,12 @@ jobs:
       - name: Send Slack Notification
         uses: slackapi/slack-github-action@v1.26.0
         with:
-          # Using the Bot Token method from your JS
-          slack-token: ${{ secrets.SLACK_BOT_TOKEN }}
-          channel-id: 'C0ANV0ZJDR6' # Your WARDEN_DEDICATED_CHANNEL_ID from JS
+          # Use ONLY valid inputs from the warning list
+          channel-id: 'C0ANV0ZJDR6' 
           payload: |
             {
-              "text": "The Warden Notice: ${{ steps.check.outputs.type }}\nFile: ${{ steps.check.outputs.fname }}\nStatus: Verified\nLink: ${{ github.server_url }}/${{ github.repository }}/blob/master/releases/${{ steps.check.outputs.fname }}"
+              "text": "The Warden Notice: ${{ steps.check.outputs.type }}\nFile: ${{ steps.check.outputs.fname }}\nStatus: Verified"
             }
         env:
+          # The Action looks for this EXACT name in the environment
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-          HACKCLUB_AI_API_KEY: ${{ secrets.HACKCLUB_AI_API_KEY }}
