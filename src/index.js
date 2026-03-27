@@ -984,9 +984,7 @@ export default {
       const mentionsWarden = messageMentionsWarden(rawText, WARDEN_USER_ID);
       const isThreadFollowUp = Boolean(event.thread_ts) && event.thread_ts !== event.ts;
       const hasWardenThreadContext = isThreadFollowUp && (await threadHasWardenReply(env, channel, thread_ts));
-      const mustReply = mentionsWarden || hasWardenThreadContext;
-      const allowsAutonomousEngagement = channel !== joinAnnounceChannelId && channel !== joinTestChannelId;
-      const shouldEvaluateWithAi = mustReply || allowsAutonomousEngagement;
+      const shouldEvaluateWithAi = mentionsWarden || hasWardenThreadContext;
 
       if (shouldEvaluateWithAi && event.ts) {
         const isFirstDelivery = await claimMessageEventReply(env, channel, event.ts);
@@ -1002,8 +1000,8 @@ export default {
           try {
             const history = await loadThreadMessages(env, channel, thread_ts);
             history.push({ role: "user", content: `<@${event.user}>: ${rawText}` });
-            const aiReplyRaw = await fetchGrokReply(env, history, { requireReply: mustReply });
-            const { reply, reaction } = parseAssistantAction(aiReplyRaw, { requireReply: mustReply });
+            const aiReplyRaw = await fetchGrokReply(env, history, { requireReply: false });
+            const { reply, reaction } = parseAssistantAction(aiReplyRaw, { requireReply: false });
 
             if (!reply && !reaction) {
               console.log("Warden chose to ignore message");
