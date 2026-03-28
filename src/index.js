@@ -1072,7 +1072,7 @@ export default {
           try {
             const history = await loadThreadMessages(env, channel, thread_ts);
             const senderName = await getSlackUsername(env, event.user);
-            history.push({ role: "user", content: `${senderName}: ${rawText}` });
+            history.push({ role: "user", content: `${senderName} (<@${event.user}>): ${rawText}` });
             const aiReplyRaw = await fetchGrokReply(env, history, { requireReply: false });
             const { reply, reaction } = parseAssistantAction(aiReplyRaw, { requireReply: false });
 
