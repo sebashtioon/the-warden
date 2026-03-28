@@ -1021,8 +1021,9 @@ export default {
       const mentionsWarden = messageMentionsWarden(rawText, WARDEN_USER_ID);
       const isThreadFollowUp = Boolean(event.thread_ts) && event.thread_ts !== event.ts;
       const hasWardenThreadContext = isThreadFollowUp && (await threadHasWardenReply(env, channel, thread_ts));
-      const wardenHasLeft = await threadIsLeft(env, channel, thread_ts);
-      const shouldEvaluateWithAi = !wardenHasLeft && (mentionsWarden || hasWardenThreadContext);
+      const wouldEvaluate = mentionsWarden || hasWardenThreadContext;
+      const wardenHasLeft = wouldEvaluate && (await threadIsLeft(env, channel, thread_ts));
+      const shouldEvaluateWithAi = wouldEvaluate && !wardenHasLeft;
 
       if (shouldEvaluateWithAi && event.ts) {
         const isFirstDelivery = await claimMessageEventReply(env, channel, event.ts);
