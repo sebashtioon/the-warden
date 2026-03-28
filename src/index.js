@@ -18,6 +18,7 @@ const putKVJson = async (kv, key, value, options = {}) => {
 import SYSTEM_PROMPT from "../prompt/prompt.md";
 
 const THREAD_MEMORY_TTL_SECONDS = 60 * 60 * 24; // 1 day
+const SLACK_USER_CACHE_TTL_SECONDS = 60 * 60 * 24; // 1 day
 const THREAD_MEMORY_MAX_MESSAGES = 20;
 const AI_FAILURE_REPLY = "bruh, even the AI doesn't know what to say.";
 const ALLOWED_REACTION_NAMES = new Set([
@@ -296,6 +297,38 @@ const slackApiRequest = async (env, method, payload) => {
     body: JSON.stringify(payload),
   });
   return res.json();
+};
+
+/**
+ * Resolves a Slack user ID to a display name, with KV caching.
+ * Falls back to the raw user ID mention if lookup fails.
+ * @param {object} env - Environment object with SLACK_BOT_TOKEN and WARDEN_KV
+ * @param {string} userId - Slack user ID
+ * @returns {Promise<string>} Display name or user ID mention
+ */
+const getSlackUsername = async (env, userId) => {
+  if (!userId) return userId;
+  const cacheKey = `warden:user:${userId}`;
+  if (env.WARDEN_KV) {
+    const cached = await env.WARDEN_KV.get(cacheKey);
+    if (cached) return cached;
+  }
+  try {
+    const data = await slackApiRequest(env, "users.info", { user: userId });
+    const name =
+      data?.user?.profile?.display_name ||
+      data?.user?.profile?.real_name ||
+      data?.user?.name;
+    if (name) {
+      if (env.WARDEN_KV) {
+        await env.WARDEN_KV.put(cacheKey, name, { expirationTtl: SLACK_USER_CACHE_TTL_SECONDS });
+      }
+      return name;
+    }
+  } catch (err) {
+    console.log("Failed to fetch Slack user info for", userId, err);
+  }
+  return `<@${userId}>`;
 };
 
 /**
@@ -1038,7 +1071,8 @@ export default {
         const runAiReply = async () => {
           try {
             const history = await loadThreadMessages(env, channel, thread_ts);
-            history.push({ role: "user", content: `<@${event.user}>: ${rawText}` });
+            const senderName = await getSlackUsername(env, event.user);
+            history.push({ role: "user", content: `${senderName}: ${rawText}` });
             const aiReplyRaw = await fetchGrokReply(env, history, { requireReply: false });
             const { reply, reaction } = parseAssistantAction(aiReplyRaw, { requireReply: false });
 
