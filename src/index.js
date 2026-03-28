@@ -108,6 +108,17 @@ const markThreadWardenReplied = async (env, channel, thread_ts) => {
   await env.WARDEN_KV.put(repliedKey, "1", { expirationTtl: 86400 });
 };
 
+const threadIsLeft = async (env, channel, thread_ts) => {
+  if (!env.WARDEN_KV) return false;
+  const val = await env.WARDEN_KV.get(`warden:left:${channel}:${thread_ts}`);
+  return val === "1";
+};
+
+const markThreadLeft = async (env, channel, thread_ts) => {
+  if (!env.WARDEN_KV) return;
+  await env.WARDEN_KV.put(`warden:left:${channel}:${thread_ts}`, "1", { expirationTtl: 86400 * 7 });
+};
+
 const claimMessageEventReply = async (env, channel, eventTs) => {
   if (!channel || !eventTs) return true;
   if (!env.WARDEN_KV) return true;
@@ -145,6 +156,7 @@ const COMMANDS_HELP_TEXT = [
   "- !warden dr-del <id> -> delete one reminder",
   "- !warden dr-del-all -> delete all reminders",
   "- !warden type <text> -> post as warden bot and delete your command",
+  "- !warden leave -> stop replying to this thread",
   "- !warden help -> show this command list",
 ].join("\n");
 
@@ -792,6 +804,17 @@ export default {
           return ack();
         }
 
+        if (normalizedText === "!warden leave") {
+          await markThreadLeft(env, channel, thread_ts);
+          const leaveReply = await postSlackMessage(env, {
+            channel,
+            thread_ts,
+            text: "aight im out :noooovanish:",
+          });
+          console.log("Slack API response (warden leave):", leaveReply);
+          return ack();
+        }
+
         if (event.user !== WARDEN_USER_ID) {
           const denied = await postSlackMessage(env, {
             channel,
@@ -838,7 +861,7 @@ export default {
         }
 
         const wardenRestText = trimmedText.replace(/^!warden\s*/i, "").trim();
-        const isKnownSubcommand = /^(help|dr\s|dr-list$|dr-del-all$|dr-del\s)/i.test(wardenRestText);
+        const isKnownSubcommand = /^(help|leave$|dr\s|dr-list$|dr-del-all$|dr-del\s)/i.test(wardenRestText);
 
         if (wardenRestText && !isKnownSubcommand) {
           const typed = await postSlackMessage(env, { channel, thread_ts, text: wardenRestText });
@@ -998,7 +1021,8 @@ export default {
       const mentionsWarden = messageMentionsWarden(rawText, WARDEN_USER_ID);
       const isThreadFollowUp = Boolean(event.thread_ts) && event.thread_ts !== event.ts;
       const hasWardenThreadContext = isThreadFollowUp && (await threadHasWardenReply(env, channel, thread_ts));
-      const shouldEvaluateWithAi = mentionsWarden || hasWardenThreadContext;
+      const wardenHasLeft = await threadIsLeft(env, channel, thread_ts);
+      const shouldEvaluateWithAi = !wardenHasLeft && (mentionsWarden || hasWardenThreadContext);
 
       if (shouldEvaluateWithAi && event.ts) {
         const isFirstDelivery = await claimMessageEventReply(env, channel, event.ts);
