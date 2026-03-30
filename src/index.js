@@ -351,6 +351,43 @@ const addSlackReaction = async (env, payload) => {
   return slackApiRequest(env, "reactions.add", payload);
 };
 
+const sendEphemeralMessage = async (env, payload) => {
+  return slackApiRequest(env, "chat.postEphemeral", payload);
+};
+
+/**
+ * Adds a user to a Slack usergroup, fetching current members first to avoid overwriting.
+ * @param {object} env
+ * @param {string} groupId - Slack usergroup ID
+ * @param {string} userId - Slack user ID to add
+ */
+const addUserToGroup = async (env, groupId, userId) => {
+  const listData = await slackApiRequest(env, "usergroups.users.list", { usergroup: groupId });
+  const currentUsers = listData?.users || [];
+  if (currentUsers.includes(userId)) return;
+  const updatedUsers = [...currentUsers, userId];
+  return slackApiRequest(env, "usergroups.users.update", {
+    usergroup: groupId,
+    users: updatedUsers.join(","),
+  });
+};
+
+/**
+ * Removes a user from a Slack usergroup.
+ * @param {object} env
+ * @param {string} groupId - Slack usergroup ID
+ * @param {string} userId - Slack user ID to remove
+ */
+const removeUserFromGroup = async (env, groupId, userId) => {
+  const listData = await slackApiRequest(env, "usergroups.users.list", { usergroup: groupId });
+  const currentUsers = listData?.users || [];
+  const updatedUsers = currentUsers.filter((u) => u !== userId);
+  return slackApiRequest(env, "usergroups.users.update", {
+    usergroup: groupId,
+    users: updatedUsers.join(","),
+  });
+};
+
 // Backward-compatible aliases used throughout existing handlers.
 const callSlackApi = slackApiRequest;
 const postSlackMessage = sendSlackMessage;
@@ -802,6 +839,36 @@ export default {
       const user = event.user;
       console.log("User joined announce channel:", user, "channel:", event.channel);
       await sendWelcomeAndRulesThread(joinAnnounceChannel, user, "member_joined_channel");
+
+      if (env.PING_GROUP_ID) {
+        const addResult = await addUserToGroup(env, env.PING_GROUP_ID, user);
+        console.log("addUserToGroup result:", addResult);
+        await sendEphemeralMessage(env, {
+          channel: joinAnnounceChannelId,
+          user,
+          text: `btw i added you to <!subteam^${env.PING_GROUP_ID}> so you get pings`,
+          blocks: [
+            {
+              type: "section",
+              text: {
+                type: "mrkdwn",
+                text: `btw i added you to <!subteam^${env.PING_GROUP_ID}> so you get pings`,
+              },
+            },
+            {
+              type: "actions",
+              elements: [
+                {
+                  type: "button",
+                  text: { type: "plain_text", text: "opt out" },
+                  action_id: "opt_out_ping_group",
+                  style: "danger",
+                },
+              ],
+            },
+          ],
+        });
+      }
     }
 
     // Handle keyword replies
@@ -1141,7 +1208,25 @@ export default {
 
     if (body.type === "block_actions") {
       console.log("block_actions event payload:", JSON.stringify(body));
-      if (body.actions && body.actions[0].action_id === "hii_button") {
+      if (body.actions && body.actions[0].action_id === "opt_out_ping_group") {
+        const userId = body.user.id;
+        const responseUrl = body.response_url;
+        if (env.PING_GROUP_ID) {
+          const removeResult = await removeUserFromGroup(env, env.PING_GROUP_ID, userId);
+          console.log("removeUserFromGroup result:", removeResult);
+        }
+        if (responseUrl) {
+          await fetch(responseUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              replace_original: true,
+              text: "ok removed you from the ping group",
+            }),
+          });
+        }
+        return ack();
+      } else if (body.actions && body.actions[0].action_id === "hii_button") {
         const userId = body.user.id;
         const channel = body.channel.id;
         const messageTs = body.message.ts;

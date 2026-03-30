@@ -5,3 +5,5 @@ SLACK_BOT_TOKEN=your_slack_bot_token_here
 # Optional: comma-separated list of additional Slack channel IDs the bot should respond in.
 # The dedicated warden channel and announce channel are always included.
 # CHANNEL_WHITELIST=C0EXAMPLE1,C0EXAMPLE2
+# Optional: Slack usergroup ID to auto-add new members to (e.g. S0EXAMPLE1). Users can opt out via ephemeral button.
+# PING_GROUP_ID=S0EXAMPLE1
