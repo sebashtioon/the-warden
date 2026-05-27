@@ -14,3 +14,6 @@ even tho this is a stupid bot just for my slack channel, there were people who h
 - [Sami9889](https://github.com/Sami9889)
 - [ingoau](https://github.com/ingoau)
 - [alexisbouchez](https://github.com/alexisbouchez)
+
+## ai use
+ai was used (refer to commit history and contributors) in the making of this bot and i got some help from my friends as well but i mostly made it and i set up everything myself
