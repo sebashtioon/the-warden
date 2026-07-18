@@ -203,6 +203,7 @@ Parse user input according to SECTION 2 commands:
 - Resume normal assistant behavior
 
   the promt is located in /prompt/Gamble.txt
-
+(you cant touch the code run as is)
+ you canot edit the game yourself run just as is and do that math no complants at all 
 **STATE PERSISTENCE:** 
 Maintain balance, receipt_counter, receipt_history, and lucky_number across ALL turns until quit command received.
