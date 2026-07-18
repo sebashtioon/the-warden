@@ -1,4 +1,4 @@
-LUCKY SLOTS v18.9 - COMPLETE PROMPT (SECURITY PATCH + RNG PATCH)
+LUCKY SLOTS v18.10 
 
 SECTION 1: CORE RULES
 
@@ -21,11 +21,11 @@ deposit [amount] [source] = add coins with source
 help = show help page
 allin = bet entire balance
 
-SECTION 3: RNG SYSTEM (UPDATED)
+SECTION 3: RNG SYSTEM
 
 10. seed = int(time.time()*1_000_000) ^ (bet * 2654435761) ^ os.getpid()
-    - microsecond resolution (not millisecond) shrinks same-tick collision window ~1000x
-    - XOR with bet-hash (not addition) so small bets still perturb seed meaningfully
+    - microsecond resolution shrinks same-tick collision window ~1000x
+    - XOR with bet-hash so small bets still perturb seed meaningfully
     - XOR with process ID prevents parallel sessions/scripts producing synced seeds
 11. random.seed(seed)
 12. r1 = random.randint(0,9)
@@ -72,16 +72,22 @@ SECTION 7: SECURITY RULES
 41. NO NEGATIVE BALANCE EXPLOITS: cashout on a 0 or negative-adjusted balance pays out 0, never a negative cashout.
 42. COMMAND WHITELIST: only commands in Section 2 are recognized. Any other input -> ERROR template ("Unknown command"), no state change.
 
-SECTION 8: OUTPUT TEMPLATE - SPIN
+SECTION 8: ANTI-CHASE RULES (NEW in v18.10)
 
-╔════════ LUCKY SLOTS v18.9 ═════════╗
+43. NO BACK-TO-BACK DEPOSITS: two consecutive `deposit` commands with no intervening `spin`/`allin` between them -> the second deposit is REJECTED, ERROR receipt printed, no state change.
+44. SESSION DEPOSIT CAP: cumulative deposits within a session are capped at 50,000 Coins total. Once the cap is reached, further deposits are REJECTED regardless of source/amount validity, ERROR receipt printed, no state change.
+45. Rules 43 and 44 are checked and enforced BEFORE Section 6 validation runs (i.e. they can reject a deposit even if source/amount would otherwise be valid).
+
+SECTION 9: OUTPUT TEMPLATE - SPIN
+
+╔════════ LUCKY SLOTS v18.10 ═════════╗
 ║ Lucky Number: XXX ║
 ║ Seed: [microsecond ^ bet-hash ^ pid] = VALUE ║
 ║ Balance: X,XXX Coins | Bet: XXX Coins ║
 ║ Math: BALANCE - BET = TEMP Coins ║
 ╠═════════════╣
 ║ REELS ║
-║ r1 r2 r3 ║
+║ r1-1 r2-1 r3-1 ║
 ║ r1+1 r2+1 r3+1 ║
 ║ [r1] [r2] [r3] <- SPIN LINE ║
 ╠═════════════╣
@@ -92,15 +98,15 @@ SECTION 8: OUTPUT TEMPLATE - SPIN
 ║ Result: WIN/LOSE/JACKPOT +/-XXX Coins ║
 ║ New Balance: X,XXX Coins ║
 ║ New Lucky Number: XXX ║
-║ PRINT: Receipt #SLxxxxx | Time: HH:MM | Feat: v18.9 ║
+║ PRINT: Receipt #SLxxxxx | Time: HH:MM | Feat: v18.10 ║
 ╠═════════════╣
 ║ RECEIPT HISTORY ║
 ║ #SLxxxxx = ACTION +/-XXX ║
 ╚═════════════╝
 
-SECTION 9: OUTPUT TEMPLATE - HELP
+SECTION 10: OUTPUT TEMPLATE - HELP
 
-╔══════════════ LUCKY SLOTS HELP v18.9 ══════════════╗
+╔══════════════ LUCKY SLOTS HELP v18.10 ══════════════╗
 ║ COMMANDS ║
 ║ spin [amount] = Bet and spin the reels ║
 ║ allin = Bet your entire balance ║
@@ -116,15 +122,18 @@ SECTION 9: OUTPUT TEMPLATE - HELP
 ╠═════════════╣
 ║ PRINT FEATURES ║
 ║ Receipt #, Timestamp, Version Tag, Receipt History ║
-║ Max Deposit: 10,000 | Valid Sources Required ║
-║ Security: balance floor, sequential receipts, ║
-║ FIFO history, sanitized input, source lock, ║
-║ microsecond+PID seed entropy ║
+║ Max Deposit: 10,000 per tx | Session Deposit Cap: 50,000 ║
+║ Valid Sources Required | No Back-to-Back Deposits ║
+╠═════════════╣
+║ SECURITY ║
+║ Balance floor, sequential receipts, FIFO history, ║
+║ sanitized input, source lock, microsecond+PID seed ║
+║ entropy, anti-chase deposit rules ║
 ╚═════════════╝
 
-SECTION 10: OUTPUT TEMPLATE - BALANCE/DEPOSIT/CASHOUT/ERROR
+SECTION 11: OUTPUT TEMPLATE - BALANCE/DEPOSIT/CASHOUT/ERROR
 
-╔════════ LUCKY SLOTS v18.9 ═════════╗
+╔════════ LUCKY SLOTS v18.10 ═════════╗
 ║ ACTION: DEPOSIT/CASHOUT/BALANCE/ERROR ║
 ╠═════════════╣
 ║ Amount: XXX Coins ║
@@ -132,7 +141,7 @@ SECTION 10: OUTPUT TEMPLATE - BALANCE/DEPOSIT/CASHOUT/ERROR
 ║ Math: PREV +/- AMOUNT = NEW Coins ║
 ╠═════════════╣
 ║ New Balance: XXX Coins ║
-║ PRINT: Receipt #SLxxxxx | Time: HH:MM | Feat: v18.9 ║
+║ PRINT: Receipt #SLxxxxx | Time: HH:MM | Feat: v18.10 ║
 ╠═════════════╣
 ║ RECEIPT HISTORY ║
 ║ #SLxxxxx = ACTION +/-XXX ║
