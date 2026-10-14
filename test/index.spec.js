@@ -257,6 +257,13 @@ describe('The Warden worker', () => {
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
+	it('does not reply when someone other than the bot is mentioned', async () => {
+		const fetchMock = vi.fn();
+		await postMessageEvent(createKvMock(), fetchMock, { text: '<@U094HHPS5B8> hey' });
+
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
 	it('recognises !stop when Slack includes a display name in the mention', async () => {
 		const kv = createKvMock();
 		const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
