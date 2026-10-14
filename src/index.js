@@ -77,7 +77,8 @@ const messageMentionsWarden = (text, wardenUserId) => {
   const lower = text.toLowerCase();
   return (
     lower.includes("warden") ||
-    text.includes(`<@${wardenUserId}>`) ||
+    text.includes(`<@${wardenUserId}`) ||
+    text.includes(`<@${WARDEN_BOT_USER_ID}`) ||
     lower.includes(WARDEN_PROFILE_URL.toLowerCase())
   );
 };
@@ -141,7 +142,8 @@ const parseCommaSeparatedList = (value) =>
 const WARDEN_USER_ID = "U094HHPS5B8";
 const WARDEN_BOT_USER_ID = "U0ALL3K13EJ";
 const WARDEN_PROFILE_URL = `https://hackclub.enterprise.slack.com/team/${WARDEN_BOT_USER_ID}`;
-const WARDEN_STOP_PATTERN = new RegExp(`^(?:<@${WARDEN_BOT_USER_ID}>|@?warden)[\\s,:]*!stop$`, "i");
+// Slack may send mentions as <@ID> or <@ID|display name>
+const WARDEN_STOP_PATTERN = new RegExp(`^(?:<@${WARDEN_BOT_USER_ID}(?:\\|[^>]*)?>|@?warden)[\\s,:]*!stop$`, "i");
 const WARDEN_DEDICATED_CHANNEL_ID = "C0ANV0ZJDR6";
 const REMINDER_KV_KEY = "warden:daily_reminders";
 const DEFAULT_WARDEN_TIME_ZONE = "Australia/Sydney";
