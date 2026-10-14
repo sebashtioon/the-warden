@@ -257,6 +257,25 @@ describe('The Warden worker', () => {
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
+	it('does not reply when someone other than the bot is mentioned', async () => {
+		const fetchMock = vi.fn();
+		await postMessageEvent(createKvMock(), fetchMock, { text: '<@U094HHPS5B8> hey' });
+
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it('recognises !stop when Slack includes a display name in the mention', async () => {
+		const kv = createKvMock();
+		const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+
+		await postMessageEvent(kv, fetchMock, {
+			text: '<@U0ALL3K13EJ|the warden>!stop',
+			thread_ts: '1234567890.000001',
+		});
+
+		expect(kv.put).toHaveBeenCalledWith('warden:left:C_CUSTOM_WHITELIST:1234567890.000001', '1', expect.anything());
+	});
+
 	it('stops replying to a thread after "@warden !stop"', async () => {
 		const kv = createKvMock();
 		const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });

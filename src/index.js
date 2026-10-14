@@ -67,17 +67,16 @@ const saveThreadMessages = async (env, channel, thread_ts, messages) => {
 
 
 /**
- * Checks if "warden" or the bot's specific User ID is present in a text string.
+ * Checks if "warden" or a mention of the bot user is present in a text string.
  * @param {string} text - Message text
- * @param {string} wardenUserId - Bot user ID
  * @returns {boolean}
  */
-const messageMentionsWarden = (text, wardenUserId) => {
+const messageMentionsWarden = (text) => {
   if (!text) return false;
   const lower = text.toLowerCase();
   return (
     lower.includes("warden") ||
-    text.includes(`<@${wardenUserId}>`) ||
+    text.includes(`<@${WARDEN_BOT_USER_ID}`) ||
     lower.includes(WARDEN_PROFILE_URL.toLowerCase())
   );
 };
@@ -141,7 +140,8 @@ const parseCommaSeparatedList = (value) =>
 const WARDEN_USER_ID = "U094HHPS5B8";
 const WARDEN_BOT_USER_ID = "U0ALL3K13EJ";
 const WARDEN_PROFILE_URL = `https://hackclub.enterprise.slack.com/team/${WARDEN_BOT_USER_ID}`;
-const WARDEN_STOP_PATTERN = new RegExp(`^(?:<@${WARDEN_BOT_USER_ID}>|@?warden)[\\s,:]*!stop$`, "i");
+// Slack may send mentions as <@ID> or <@ID|display name>
+const WARDEN_STOP_PATTERN = new RegExp(`^(?:<@${WARDEN_BOT_USER_ID}(?:\\|[^>]*)?>|@?warden)[\\s,:]*!stop$`, "i");
 const WARDEN_DEDICATED_CHANNEL_ID = "C0ANV0ZJDR6";
 const REMINDER_KV_KEY = "warden:daily_reminders";
 const DEFAULT_WARDEN_TIME_ZONE = "Australia/Sydney";
@@ -1066,7 +1066,7 @@ export default {
         return ack();
       }
 
-      const mentionsWarden = messageMentionsWarden(rawText, WARDEN_USER_ID);
+      const mentionsWarden = messageMentionsWarden(rawText);
       const isThreadFollowUp = Boolean(event.thread_ts) && event.thread_ts !== event.ts;
       const hasWardenThreadContext = isThreadFollowUp && (await threadHasWardenReply(env, channel, thread_ts));
       const wouldEvaluate = mentionsWarden || hasWardenThreadContext;
