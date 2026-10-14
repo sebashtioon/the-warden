@@ -179,6 +179,7 @@ describe('The Warden worker', () => {
 		vi.stubGlobal('fetch', fetchMock);
 
 		const kv = createKvMock();
+		await kv.put('warden:user:U123', 'tester');
 		const ctx = createExecutionContext();
 		const response = await worker.fetch(
 			new Request('http://example.com', {
@@ -190,7 +191,7 @@ describe('The Warden worker', () => {
 						type: 'message',
 						channel: 'C_CUSTOM_WHITELIST',
 						user: 'U123',
-						text: 'that message was dumb',
+						text: 'warden that message was dumb',
 						ts: '1234567890.123456',
 					},
 				}),
