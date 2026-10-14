@@ -216,4 +216,66 @@ describe('The Warden worker', () => {
 			name: 'loll',
 		});
 	});
+
+	const postMessageEvent = async (kv, fetchMock, eventOverrides) => {
+		vi.stubGlobal('fetch', fetchMock);
+		const ctx = createExecutionContext();
+		const response = await worker.fetch(
+			new Request('http://example.com', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({
+					type: 'event_callback',
+					event: {
+						type: 'message',
+						channel: 'C_CUSTOM_WHITELIST',
+						user: 'U123',
+						ts: '1234567890.123456',
+						...eventOverrides,
+					},
+				}),
+			}),
+			{
+				...env,
+				HACKCLUB_AI_API_KEY: 'test-key',
+				CHANNEL_WHITELIST: 'C_CUSTOM_WHITELIST',
+				WARDEN_KV: kv,
+				SLACK_BOT_TOKEN: 'xoxb-test',
+			},
+			ctx,
+		);
+		await waitOnExecutionContext(ctx);
+		return response;
+	};
+
+	it('never sends ##-prefixed messages to the AI', async () => {
+		const fetchMock = vi.fn();
+		const response = await postMessageEvent(createKvMock(), fetchMock, { text: '## warden ur fat' });
+
+		expect(response.status).toBe(200);
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it('stops replying to a thread after "@warden !stop"', async () => {
+		const kv = createKvMock();
+		const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+
+		await postMessageEvent(kv, fetchMock, {
+			text: '<@U0ALL3K13EJ> !stop',
+			thread_ts: '1234567890.000001',
+		});
+
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(fetchMock.mock.calls[0][0]).toBe('https://slack.com/api/chat.postMessage');
+		expect(kv.put).toHaveBeenCalledWith('warden:left:C_CUSTOM_WHITELIST:1234567890.000001', '1', expect.anything());
+
+		fetchMock.mockClear();
+		await postMessageEvent(kv, fetchMock, {
+			text: 'warden say something',
+			thread_ts: '1234567890.000001',
+			ts: '1234567890.123457',
+		});
+
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
 });

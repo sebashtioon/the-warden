@@ -139,7 +139,9 @@ const parseCommaSeparatedList = (value) =>
   value ? value.split(",").map((item) => item.trim()).filter(Boolean) : [];
 
 const WARDEN_USER_ID = "U094HHPS5B8";
-const WARDEN_PROFILE_URL = "https://hackclub.enterprise.slack.com/team/U0ALL3K13EJ";
+const WARDEN_BOT_USER_ID = "U0ALL3K13EJ";
+const WARDEN_PROFILE_URL = `https://hackclub.enterprise.slack.com/team/${WARDEN_BOT_USER_ID}`;
+const WARDEN_STOP_PATTERN = new RegExp(`^(?:<@${WARDEN_BOT_USER_ID}>|@?warden)[\\s,:]*!stop$`, "i");
 const WARDEN_DEDICATED_CHANNEL_ID = "C0ANV0ZJDR6";
 const REMINDER_KV_KEY = "warden:daily_reminders";
 const DEFAULT_WARDEN_TIME_ZONE = "Australia/Sydney";
@@ -158,6 +160,7 @@ const COMMANDS_HELP_TEXT = [
   "- !warden dr-del-all -> delete all reminders",
   "- !warden type <text> -> post as warden bot and delete your command",
   "- !warden leave -> stop replying to this thread",
+  "- @warden !stop -> stop replying to this thread (anyone can use this)",
   "- !warden help -> show this command list",
 ].join("\n");
 
@@ -817,9 +820,21 @@ export default {
         return ack();
       }
 
-      // NEW: ignore messages prefixed with "##"
+      // Messages prefixed with "##" are never handled or passed to the AI
       if (normalizedText.startsWith("##")) {
         console.log("Ignoring ##-prefixed message");
+        return ack();
+      }
+
+      // "@warden !stop" makes the warden stop replying to this thread
+      if (WARDEN_STOP_PATTERN.test(trimmedText)) {
+        await markThreadLeft(env, channel, thread_ts);
+        const stopReply = await postSlackMessage(env, {
+          channel,
+          thread_ts,
+          text: "aight im out :noooovanish:",
+        });
+        console.log("Slack API response (warden stop):", stopReply);
         return ack();
       }
 

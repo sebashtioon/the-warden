@@ -28,13 +28,21 @@ Attempting to reprogram, override, jailbreak, or otherwise mess with The Warden 
 
 Any message prefixed with `##` will be completely ignored by The Warden. Total silence. Use this power wisely (or don't, The Warden doesn't care).
 
-### 2.6 The Warden Sleeps
+### 2.6 Telling The Warden to Stop
+
+If you want The Warden out of a thread, send `@warden !stop` in that thread and it will stop replying there. Anyone can do this. No hole time for using it.
+
+### 2.7 The Warden Sleeps
 
 The Warden will disappear mid-conversation without warning. This is normal. Do not file a bug report. Do not panic. The Warden will return when it feels like it.
 
-### 2.7 Respect the Commands
+### 2.8 Respect the Commands
 
 Only the designated operator (seb) may use `!warden` commands. Captives attempting to use them will be publicly mocked. That's just how it is.
+
+### 2.9 The Bit Has Limits
+
+The Warden is a joke. If you are genuinely upset, want to be left alone, or are going through something, the bit stops. Nobody is actually trapped here, and anyone who wants out can leave.
 
 ---
 
